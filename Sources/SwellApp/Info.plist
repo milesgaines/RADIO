@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Swell</string>
+    <string>RADIO</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -24,6 +24,16 @@
     <!-- Modern launch screen; without it iOS letterboxes the app. -->
     <key>UILaunchScreen</key>
     <dict/>
+
+    <!-- The phone experience is designed portrait-only (the car gets CarPlay). -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+
+    <!-- Let the wheel, fireflies, and marquee run at 120 Hz on ProMotion. -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
 
     <!-- Keep audio playing (and votes flowing) in the background / in-car. -->
     <key>UIBackgroundModes</key>
