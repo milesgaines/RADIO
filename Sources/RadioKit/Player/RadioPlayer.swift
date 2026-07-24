@@ -20,19 +20,30 @@ public final class RadioPlayer: ObservableObject {
     @Published public private(set) var isPlaying = false
 
     private let player = AVPlayer()
-    private let stream: LiveStreamService
+    private var stream: LiveStreamService
     private var cancellables: Set<AnyCancellable> = []
 
     public init(stream: LiveStreamService) {
         self.stream = stream
         configureAudioSession()
         configureRemoteCommands()
+        attach(to: stream)
+    }
+
+    /// Retune to another station's stream. Stations are always-on — the old
+    /// stream keeps running for everyone else; this device just points its
+    /// player (and the system Now Playing surfaces) at a different one.
+    public func attach(to stream: LiveStreamService) {
+        cancellables.removeAll()
+        self.stream = stream
 
         // Whenever the live stream advances, swap the asset + refresh metadata.
         stream.$nowPlaying
             .compactMap { $0 }
             .sink { [weak self] np in self?.load(np) }
             .store(in: &cancellables)
+
+        if let np = stream.nowPlaying { load(np) }
     }
 
     public func play() {

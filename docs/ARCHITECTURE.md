@@ -50,6 +50,9 @@ is covered by unit tests.
 | Direct-license safety | `Track.interactiveLicenseGranted` | Engine refuses to schedule any master not opted in for interactive use. |
 | CarPlay = consumption + one interaction | `CarPlaySceneDelegate`, `RadioPlayer` | Templates only; `likeCommand` → boost; `nextTrackCommand` disabled (no hand-picking). |
 | OneSync catalog swap | `MockCatalog` | The only place the data source lives; replace with the real opt-in feed. |
+| Stations feel alive from second one | `CrowdSimulator` | Synthetic listeners tune in/out on a daypart wave and vote through the same `join`/`leave`/`castVote` API the production websocket will use. Deleted at production swap. |
+| Trust is earned, and it persists | `ListenerStore`, `ListeningMeter` | One identity per device across launches; listening tenure accrues while playback runs and is banked to disk, so `AntiGaming` trust grows with real use. |
+| More than one room to walk into | `MockCatalog.stations`, `AppServices.tune(to:)` | Three always-on stations over artist-subset catalogs; tuning re-points the shared player, both phone and CarPlay follow. |
 
 ## Design invariants (enforced by tests)
 
@@ -59,6 +62,10 @@ is covered by unit tests.
 - **Fresh/unverified accounts barely count** (`testFreshAccountVoteIsHeavilyDiscounted`).
 - **Unlicensed masters are never scheduled** (`testUnlicensedTrackIsNeverScheduled`).
 - **No third consecutive track by one artist** (`testConsecutiveArtistCapEnforced`).
+- **Votes from listeners who never tuned in are dropped** (`testVoteFromUnknownListenerIsDropped`).
+- **The simulated crowd is deterministic under a seed** (`testSimulationReplaysIdenticallyUnderSameSeed`) — demos replay, tests don't flake.
+- **Station catalogs only contain opted-in artists** (`testStationCatalogsOnlyContainOptedInArtists`).
+- **Identity survives relaunch and tenure never double-counts** (`testLoadOrCreateReturnsTheSameIdentityNextLaunch`, `testListeningMeterFlushBanksMidSessionAndPersists`).
 
 ## Swapping the mock for production
 
@@ -69,3 +76,8 @@ is covered by unit tests.
    — the same server runs `WeightedRotationEngine` so every listener is in sync.
 3. Point `Track.assetURL` at real HLS stream URLs; `RadioPlayer` already drives
    `AVPlayer` + the Now Playing surfaces.
+4. Delete `CrowdSimulator`. Real presence and votes arrive over the websocket
+   and land on the same `LiveStreamService.join`/`leave`/`castVote` calls the
+   simulator uses today — nothing downstream changes.
+5. Anchor the persisted `Listener` identity to a server account;
+   `UserDefaultsListenerStore` becomes a cache of the same shape.

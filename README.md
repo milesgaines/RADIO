@@ -20,32 +20,39 @@ tripping the licensing wire that killed everyone who tried this before.
 
 | Path | Role |
 |---|---|
-| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
-| `Sources/SwellApp/` | The iOS app: `AppDelegate` scene routing, `PhoneSceneDelegate` (SwiftUI), `CarPlaySceneDelegate` (templates), `RootView`. |
-| `Tests/RadioKitTests/` | Unit tests pinning the design invariants (no dead air, boost-wins-more, superfans can't dominate, unlicensed never plays…). |
+| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the crowd simulator, listener persistence, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
+| `Sources/SwellApp/` | The iOS app: `AppDelegate` scene routing, `PhoneSceneDelegate` (SwiftUI), `CarPlaySceneDelegate` (templates), `RootView` with the station dial. |
+| `Tests/RadioKitTests/` | Unit tests pinning the design invariants (no dead air, boost-wins-more, superfans can't dominate, unlicensed never plays, identity survives relaunch…). |
 | `project.yml` | XcodeGen spec — the `.xcodeproj` is generated, not committed. |
+| `Package.swift` | SwiftPM manifest for `RadioKit` only, so `swift test` runs the core suite headlessly (CI, no simulator). |
 | `docs/` | Research, architecture, CarPlay design. |
 
 ## Build & run
 
 Requires macOS + Xcode 15+ (iOS 17 target). The project file is generated with
-[XcodeGen](https://github.com/yonsm/XcodeGen) so it stays a reviewable plain-text
-spec:
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) so it stays a reviewable
+plain-text spec:
 
 ```bash
-brew install xcodegen        # once
+brew install xcodegen        # once (or build from source: clone XcodeGen, `swift build -c release`)
 git clone https://github.com/milesgaines/RADIO.git && cd RADIO
 xcodegen generate            # produces Swell.xcodeproj
 open Swell.xcodeproj         # ⌘R to run on an iPhone simulator
 ```
 
-Then run the tests with `⌘U`, or from the command line:
+The core logic tests need no simulator at all:
+
+```bash
+swift test
+```
+
+Or run them through Xcode with `⌘U`, or from the command line:
 
 ```bash
 xcodebuild test \
   -project Swell.xcodeproj \
   -scheme Swell \
-  -destination 'platform=iOS Simulator,name=iPhone 15'
+  -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 ### Trying CarPlay
@@ -57,12 +64,18 @@ as the phone. See [`docs/CARPLAY.md`](docs/CARPLAY.md).
 
 ## Status
 
-This is an MVP **scaffold**: the rotation/voting/anti-gaming logic is real and
-tested, but the live stream is simulated in-app (a timer advances tracks) and
-the catalog is `MockCatalog`. The two production swaps — a websocket stream
-client and the real OneSync opt-in catalog — are isolated to
-`LiveStreamService` and `MockCatalog` respectively; nothing else changes. See
-"Swapping the mock for production" in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+This is a working MVP **demo**: the rotation/voting/anti-gaming logic is real
+and tested, three always-on stations run side by side with a **simulated live
+crowd** (synthetic listeners tune in and out and vote, so the tallies, teaser,
+and listener counts move like the real thing), and the device's listener
+identity **persists across launches** — trust accrues with genuine listening
+time. The live stream itself is still simulated in-app (a timer advances
+tracks) and the catalog is `MockCatalog`; audio is silent until `assetURL`
+points at real streams. The production swaps — a websocket stream client and
+the real OneSync opt-in catalog — are isolated to `LiveStreamService` and
+`MockCatalog`; the `CrowdSimulator` is simply deleted (real presence and votes
+use the same API). See "Swapping the mock for production" in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## License / legal
 

@@ -84,13 +84,50 @@ public final class LiveStreamService: ObservableObject {
         }
     }
 
+    // MARK: - Audience
+
+    /// A listener tunes in. In production this arrives over the websocket as
+    /// presence; the in-app `CrowdSimulator` calls it to make the demo feel
+    /// live. Idempotent per listener id.
+    public func join(_ listener: Listener) {
+        listeners[listener.id] = listener
+        refreshListenerCount()
+    }
+
+    /// A listener tunes out. The device's own listener never leaves.
+    public func leave(_ listenerID: UUID) {
+        guard listenerID != currentListener.id else { return }
+        listeners.removeValue(forKey: listenerID)
+        refreshListenerCount()
+    }
+
+    /// Everyone currently tuned in (including the device's listener).
+    public var audienceCount: Int { listeners.count }
+
+    /// Replace the stored profile for the device's listener — used when
+    /// persisted listening tenure accrues, so vote trust reflects it.
+    public func refreshCurrentListener(_ updated: Listener) {
+        guard updated.id == currentListener.id else { return }
+        listeners[updated.id] = updated
+    }
+
     // MARK: - Voting
 
-    /// Boost or bury a track from the live audience. Returns the new net tally.
+    /// Boost or bury a track as the device's listener. Returns the new net tally.
     @discardableResult
     public func vote(_ direction: VoteDirection, on trackID: UUID) -> Int {
+        castVote(direction, on: trackID, by: currentListener.id)
+    }
+
+    /// Boost or bury a track on behalf of any tuned-in listener. This is the
+    /// same path a vote coming off the wire takes in production; the
+    /// `CrowdSimulator` uses it for synthetic listeners. Votes from unknown
+    /// listeners are dropped (the tally would discard them anyway).
+    @discardableResult
+    public func castVote(_ direction: VoteDirection, on trackID: UUID, by listenerID: UUID) -> Int {
+        guard listeners[listenerID] != nil else { return currentBoostScore(for: trackID) }
         let vote = Vote(
-            listenerID: currentListener.id,
+            listenerID: listenerID,
             trackID: trackID,
             stationID: station.id,
             direction: direction,
@@ -99,10 +136,23 @@ public final class LiveStreamService: ObservableObject {
         votes.append(vote)
         recomputePreview()
         if var np = nowPlaying, np.track.id == trackID {
-            np.boostScore += direction.rawValue
+            np.boostScore = currentBoostScore(for: trackID)
             nowPlaying = np
         }
-        return Int(netWeights()[trackID] ?? 0)
+        return currentBoostScore(for: trackID)
+    }
+
+    /// The displayed score is the *effective* net tally (trust-weighted,
+    /// decayed), rounded — so what listeners see is what actually shapes
+    /// rotation, and a bot farm's spam visibly counts for almost nothing.
+    private func currentBoostScore(for trackID: UUID) -> Int {
+        Int((netWeights()[trackID] ?? 0).rounded())
+    }
+
+    private func refreshListenerCount() {
+        guard var np = nowPlaying else { return }
+        np.liveListeners = max(1, listeners.count)
+        nowPlaying = np
     }
 
     /// Convenience for the single CarPlay / Siri "boost current track" action.
@@ -128,7 +178,7 @@ public final class LiveStreamService: ObservableObject {
         nowPlaying = NowPlaying(
             track: track,
             startedAt: n,
-            boostScore: Int(netWeights()[track.id] ?? 0),
+            boostScore: currentBoostScore(for: track.id),
             liveListeners: max(1, listeners.count)
         )
         recomputePreview()

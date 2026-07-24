@@ -21,6 +21,21 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     DEVELOPMENT_TEAM: "" # set your team, or configure signing in Xcode
 
+# The scheme the README's build/test commands use: builds the app, tests the
+# RadioKit unit suite.
+schemes:
+  Swell:
+    build:
+      targets:
+        Swell: all
+        RadioKitTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - RadioKitTests
+
 targets:
   RadioKit:
     type: framework
@@ -30,6 +45,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fm.swell.kit
+        GENERATE_INFOPLIST_FILE: YES
 
   Swell:
     type: application
@@ -52,3 +68,7 @@ targets:
       - Tests/RadioKitTests
     dependencies:
       - target: RadioKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fm.swell.kit.tests
+        GENERATE_INFOPLIST_FILE: YES
