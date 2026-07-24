@@ -20,6 +20,12 @@ final class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.rootViewController = UIHostingController(rootView: root)
         self.window = window
         window.makeKeyAndVisible()
+
+        // Demo/automation hook: `-SwellAutoPlay YES` as a launch argument
+        // starts playback immediately (simulator runs, screenshots, demos).
+        if UserDefaults.standard.bool(forKey: "SwellAutoPlay") {
+            AppServices.shared.player.play()
+        }
     }
 
     /// Bank listening tenure whenever the app leaves the foreground, so a

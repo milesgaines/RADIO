@@ -46,6 +46,36 @@ public struct WeightedRotationEngine: Sendable {
             self.maxConsecutivePerArtist = maxConsecutivePerArtist
             self.windowSeconds = windowSeconds
         }
+
+        /// Defaults sized for a full production catalog, scaled down so a
+        /// small catalog (an MVP folder of a dozen masters) doesn't slam
+        /// every track into the repeat gap and live off the dead-air
+        /// fallback. Rule of thumb: you can't demand a 45-minute gap from a
+        /// 20-minute catalog.
+        public static func adaptive(to catalog: [Track]) -> Config {
+            let totalSeconds = catalog.reduce(0) { $0 + $1.durationSeconds }
+            var config = Config()
+            config.minRepeatGapSeconds = min(config.minRepeatGapSeconds, totalSeconds * 0.5)
+            config.windowSeconds = min(config.windowSeconds, totalSeconds * 1.5)
+
+            let artistCount = Set(catalog.map(\.artistID)).count
+            if artistCount <= 1 {
+                // The complement is a *diversity* rule; with one artist there
+                // is no diversity to protect. Leaving it on would force every
+                // selection into the dead-air fallback — which ignores votes —
+                // and silently turn the station into a shuffle.
+                config.maxTracksPerArtistPerWindow = Int.max
+                config.maxConsecutivePerArtist = Int.max
+            } else if artistCount < 4 {
+                // Small roster: give each artist a proportional share of the
+                // window instead of the big-catalog constant.
+                config.maxTracksPerArtistPerWindow = max(
+                    config.maxTracksPerArtistPerWindow,
+                    catalog.count / artistCount + 1
+                )
+            }
+            return config
+        }
     }
 
     /// One entry in the recent play history, used to enforce the complement.
@@ -129,10 +159,18 @@ public struct WeightedRotationEngine: Sendable {
         }
 
         guard !weighted.isEmpty else {
-            // No eligible candidate under the complement — relax to "anything
-            // licensed and not literally just played" so the station never
-            // goes silent. Dead air is worse than a slightly-too-soon repeat.
-            return candidates.first(where: { $0.interactiveLicenseGranted })
+            // No eligible candidate under the complement — relax so the
+            // station never goes silent. Dead air is worse than a
+            // slightly-too-soon repeat, but a *loop of one track* is worse
+            // still, so fall back to the least-recently-played licensed
+            // track (never-played first) instead of an arbitrary constant.
+            var lastPlayed: [UUID: Date] = [:]
+            for record in history {
+                lastPlayed[record.trackID] = max(record.playedAt, lastPlayed[record.trackID] ?? .distantPast)
+            }
+            return candidates
+                .filter(\.interactiveLicenseGranted)
+                .min { (lastPlayed[$0.id] ?? .distantPast) < (lastPlayed[$1.id] ?? .distantPast) }
         }
 
         let total = weighted.reduce(0) { $0 + $1.1 }

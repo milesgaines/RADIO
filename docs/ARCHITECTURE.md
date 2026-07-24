@@ -52,7 +52,10 @@ is covered by unit tests.
 | OneSync catalog swap | `MockCatalog` | The only place the data source lives; replace with the real opt-in feed. |
 | Stations feel alive from second one | `CrowdSimulator` | Synthetic listeners tune in/out on a daypart wave and vote through the same `join`/`leave`/`castVote` API the production websocket will use. Deleted at production swap. |
 | Trust is earned, and it persists | `ListenerStore`, `ListeningMeter` | One identity per device across launches; listening tenure accrues while playback runs and is banked to disk, so `AntiGaming` trust grows with real use. |
-| More than one room to walk into | `MockCatalog.stations`, `AppServices.tune(to:)` | Three always-on stations over artist-subset catalogs; tuning re-points the shared player, both phone and CarPlay follow. |
+| More than one room to walk into | `MockCatalog.stations`, `AppServices.tune(to:)` | Always-on stations over subset catalogs; tuning re-points the shared player, both phone and CarPlay follow. |
+| Real masters play today | `FolderCatalog`, `RealAudio/` | A local folder of licensed audio becomes the station catalog (tags → filename `Artist - Title` → de-slug fallback; album subfolders become album stations). Contents never enter git. |
+| Radio joins live, resumes live | `RadioPlayer.seekToLiveEdge` | Tune in mid-track, start mid-track; resume after pause rejoins the live second — never "where you left off". |
+| Small catalogs don't starve | `Config.adaptive(to:)`, LRP fallback | Repeat-gap/window scale to catalog length; single-artist catalogs relax the complement so votes keep mattering; the dead-air fallback plays least-recently-played, never a one-track loop. |
 
 ## Design invariants (enforced by tests)
 

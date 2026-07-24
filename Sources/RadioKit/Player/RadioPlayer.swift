@@ -48,6 +48,9 @@ public final class RadioPlayer: ObservableObject {
 
     public func play() {
         stream.start()
+        // Radio, not a podcast: resuming after a pause rejoins the *live*
+        // second, it does not pick up where you left off.
+        if let np = stream.nowPlaying { seekToLiveEdge(np) }
         player.play()
         isPlaying = true
         refreshNowPlayingInfo()
@@ -66,9 +69,25 @@ public final class RadioPlayer: ObservableObject {
     private func load(_ np: NowPlaying) {
         if let url = np.track.assetURL {
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            seekToLiveEdge(np)
             if isPlaying { player.play() }
         }
         refreshNowPlayingInfo()
+    }
+
+    /// Jump the asset to wherever the shared stream clock says the station
+    /// is right now — "everyone hears the same second". No-op near track
+    /// start so normal advances don't churn a redundant seek.
+    private func seekToLiveEdge(_ np: NowPlaying) {
+        guard np.track.assetURL != nil else { return }
+        let elapsed = np.elapsed(at: Date())
+        guard elapsed > 1.5 else { return }
+        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+        player.seek(
+            to: CMTime(seconds: elapsed, preferredTimescale: 600),
+            toleranceBefore: tolerance,
+            toleranceAfter: tolerance
+        )
     }
 
     // MARK: - System integration

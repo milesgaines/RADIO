@@ -52,6 +52,11 @@ targets:
     platform: iOS
     sources:
       - Sources/SwellApp
+      # Folder reference: drop licensed masters in RealAudio/ and the app
+      # plays them (contents are gitignored; see RealAudio/README.md).
+      - path: RealAudio
+        type: folder
+        buildPhase: resources
     dependencies:
       - target: RadioKit
     settings:

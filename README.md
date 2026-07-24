@@ -64,17 +64,23 @@ as the phone. See [`docs/CARPLAY.md`](docs/CARPLAY.md).
 
 ## Status
 
-This is a working MVP **demo**: the rotation/voting/anti-gaming logic is real
-and tested, three always-on stations run side by side with a **simulated live
-crowd** (synthetic listeners tune in and out and vote, so the tallies, teaser,
-and listener counts move like the real thing), and the device's listener
-identity **persists across launches** — trust accrues with genuine listening
-time. The live stream itself is still simulated in-app (a timer advances
-tracks) and the catalog is `MockCatalog`; audio is silent until `assetURL`
-points at real streams. The production swaps — a websocket stream client and
-the real OneSync opt-in catalog — are isolated to `LiveStreamService` and
-`MockCatalog`; the `CrowdSimulator` is simply deleted (real presence and votes
-use the same API). See "Swapping the mock for production" in
+This is a working MVP **demo with real audio**: the rotation/voting/
+anti-gaming logic is real and tested, always-on stations run side by side with
+a **simulated live crowd** (synthetic listeners tune in and out and vote, so
+the tallies, teaser, and listener counts move like the real thing), and the
+device's listener identity **persists across launches** — trust accrues with
+genuine listening time.
+
+Audio comes from the local **`RealAudio/`** folder (gitignored; see
+[`RealAudio/README.md`](RealAudio/README.md)): drop licensed masters in and
+`FolderCatalog` turns them into stations — the full catalog, one station per
+album subfolder, and the loose singles. With no local audio the app falls back
+to the silent three-station `MockCatalog` demo. The stream clock is still
+simulated in-app (a timer advances tracks). The production swaps — a websocket
+stream client and the real OneSync opt-in catalog feed — are isolated to
+`LiveStreamService` and the catalog source (`FolderCatalog`/`MockCatalog`);
+the `CrowdSimulator` is simply deleted (real presence and votes use the same
+API). See "Swapping the mock for production" in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## License / legal

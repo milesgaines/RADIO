@@ -109,6 +109,86 @@ final class EngineTests: XCTestCase {
         XCTAssertNotNil(pick, "The station must never go silent when a licensed track exists")
     }
 
+    func testDeadAirFallbackRotatesInsteadOfLoopingOneTrack() {
+        // Small catalog + long repeat gap = everything blocked. The fallback
+        // must cycle through the catalog (least-recently-played first), not
+        // pin the station to a single track forever.
+        let engine = WeightedRotationEngine(config: .init(minRepeatGapSeconds: 60 * 60 * 24))
+        let a = track("a", artist: 1)
+        let b = track("b", artist: 2)
+        var history = [
+            WeightedRotationEngine.PlayRecord(trackID: a.id, artistID: a.artistID, playedAt: now.addingTimeInterval(-400)),
+            WeightedRotationEngine.PlayRecord(trackID: b.id, artistID: b.artistID, playedAt: now.addingTimeInterval(-200)),
+        ]
+        var played: [UUID] = []
+        for step in 0..<4 {
+            let when = now.addingTimeInterval(Double(step) * 200)
+            let pick = engine.selectNext(
+                candidates: [a, b],
+                netVoteWeight: { _ in 0 },
+                history: history,
+                now: when,
+                random: { 0.5 }
+            )!
+            played.append(pick.id)
+            history.append(.init(trackID: pick.id, artistID: pick.artistID, playedAt: when))
+        }
+        XCTAssertEqual(played, [a.id, b.id, a.id, b.id], "Fallback must alternate, never loop one track")
+    }
+
+    // MARK: - Adaptive config
+
+    func testAdaptiveConfigShrinksRepeatGapForSmallCatalogs() {
+        let smallCatalog = (0..<6).map { track("t\($0)", artist: $0 % 3 + 1, dur: 200) }
+        let config = WeightedRotationEngine.Config.adaptive(to: smallCatalog)
+        XCTAssertEqual(config.minRepeatGapSeconds, 600, accuracy: 0.001,
+                       "Gap must scale to half the 1200 s catalog, not demand 45 minutes")
+
+        let bigCatalog = (0..<200).map { n in
+            Track(title: "t\(n)", artistID: FolderCatalog.stableID("artist:\(n % 40)"),
+                  artistName: "A\(n % 40)", durationSeconds: 200)
+        }
+        let bigConfig = WeightedRotationEngine.Config.adaptive(to: bigCatalog)
+        XCTAssertEqual(bigConfig.minRepeatGapSeconds, 60 * 45, accuracy: 0.001,
+                       "A big catalog keeps the production defaults")
+    }
+
+    func testSingleArtistCatalogKeepsVotingAliveInsteadOfFallbackShuffle() {
+        // One artist (a folder of one act's masters): with the complement
+        // relaxed, selection must stay in the *weighted* path, so a boosted
+        // track still wins more often — votes keep mattering.
+        let catalog = (0..<5).map { track("t\($0)", artist: 1, dur: 200) }
+        let config = WeightedRotationEngine.Config.adaptive(to: catalog)
+        let engine = WeightedRotationEngine(config: .init(
+            voteSensitivity: 1.0,
+            minRepeatGapSeconds: config.minRepeatGapSeconds,
+            maxTracksPerArtistPerWindow: config.maxTracksPerArtistPerWindow,
+            maxConsecutivePerArtist: config.maxConsecutivePerArtist,
+            windowSeconds: config.windowSeconds
+        ))
+        let history = (0..<4).map { i in
+            WeightedRotationEngine.PlayRecord(
+                trackID: catalog[i].id, artistID: catalog[i].artistID,
+                playedAt: now.addingTimeInterval(Double(i - 4) * 200)
+            )
+        }
+        let boosted = catalog[4]
+        var wins = 0
+        let trials = 1000
+        for i in 0..<trials {
+            let pick = engine.selectNext(
+                candidates: catalog,
+                netVoteWeight: { $0.id == boosted.id ? 5.0 : 0.0 },
+                history: history,
+                now: now.addingTimeInterval(700), // past the scaled repeat gap
+                random: { Double(i) / Double(trials) }
+            )
+            if pick?.id == boosted.id { wins += 1 }
+        }
+        XCTAssertGreaterThan(wins, trials / 2,
+                             "Single-artist catalogs must not silently degrade into an unvoted shuffle")
+    }
+
     func testUnlicensedTrackIsNeverScheduled() {
         let engine = WeightedRotationEngine()
         let unlicensed = Track(title: "no", artistID: artist(9), artistName: "A9",
