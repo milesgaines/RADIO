@@ -44,7 +44,7 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             completion()
         }
         let section = CPListSection(items: [item])
-        let template = CPListTemplate(title: "Swell", sections: [section])
+        let template = CPListTemplate(title: "RADIO+", sections: [section])
         return template
     }
 

@@ -55,6 +55,12 @@ public final class RadioPlayer: ObservableObject {
     private func load(_ np: NowPlaying) {
         if let url = np.track.assetURL {
             player.replaceCurrentItem(with: AVPlayerItem(url: url))
+            // Everyone hears the same second: join the track already in
+            // progress rather than starting it from zero.
+            let elapsed = np.elapsed(at: Date())
+            if elapsed > 1 {
+                player.seek(to: CMTime(seconds: elapsed, preferredTimescale: 600))
+            }
             if isPlaying { player.play() }
         }
         refreshNowPlayingInfo()

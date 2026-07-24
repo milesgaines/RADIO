@@ -37,7 +37,7 @@ on the **phone**, where Apple permits it — see `RootView`.
 ## Entitlement & running it
 
 - The app declares `com.apple.developer.carplay-audio`
-  (`Swell.entitlements`). This is a **managed entitlement**: Apple grants
+  (`RadioPlus.entitlements`). This is a **managed entitlement**: Apple grants
   it on request via the CarPlay entitlement request form. Until granted, the
   CarPlay scene will not appear on real hardware.
 - For development you do **not** need the entitlement approved: use Xcode's

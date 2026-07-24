@@ -41,7 +41,7 @@ public enum MockCatalog {
     }()
 
     public static let flagshipStation = Station(
-        name: "Swell",
+        name: "RADIO+",
         tagline: "One station. Everyone hears the same second. You program it.",
         catalogArtistIDs: Set(artists.map(\.id))
     )

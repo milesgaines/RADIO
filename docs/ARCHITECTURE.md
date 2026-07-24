@@ -7,7 +7,7 @@ is covered by unit tests.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                            SwellApp                          │
+│                            RadioPlusApp                          │
 │                                                                │
 │   AppDelegate ── configurationForConnecting(scene) ──┐         │
 │                                                      │         │
@@ -49,7 +49,9 @@ is covered by unit tests.
 | Performance-complement balance | `WeightedRotationEngine.isEligible` | ≤4 tracks/artist per 3h window, ≤3 consecutive, repeat gap. |
 | Direct-license safety | `Track.interactiveLicenseGranted` | Engine refuses to schedule any master not opted in for interactive use. |
 | CarPlay = consumption + one interaction | `CarPlaySceneDelegate`, `RadioPlayer` | Templates only; `likeCommand` → boost; `nextTrackCommand` disabled (no hand-picking). |
-| OneSync catalog swap | `MockCatalog` | The only place the data source lives; replace with the real opt-in feed. |
+| OneSync catalog swap | `MockCatalog` | The only place the demo data lives; replace with the real opt-in feed. |
+| Real streaming backend | `NavidromeClient` (`Navidrome.swift`) | Subsonic-API client for a self-hosted Navidrome server: salted-token auth, catalog fetch → `Track`s with stream + artwork URLs. Configured in the app's Settings tab; `AppServices.reloadCatalog()` swaps it into the live rotation. |
+| Joined-in-progress playback | `RadioPlayer.load` | Seeks each new asset to the stream's elapsed offset so every listener hears the same second. |
 
 ## Design invariants (enforced by tests)
 

@@ -17,7 +17,7 @@ public final class LiveStreamService: ObservableObject {
     @Published public private(set) var nowPlaying: NowPlaying?
     @Published public private(set) var upNextPreview: [Track] = []
 
-    private let catalog: [Track]
+    private var catalog: [Track]
     private let engine: WeightedRotationEngine
     private let tally: VoteTally
 
@@ -82,6 +82,16 @@ public final class LiveStreamService: ObservableObject {
             if Task.isCancelled { break }
             advance()
         }
+    }
+
+    // MARK: - Catalog
+
+    /// Swap in a new catalog (e.g. after connecting a Navidrome server).
+    /// The current track finishes; the next advance draws from the new pool.
+    public func updateCatalog(_ tracks: [Track]) {
+        guard !tracks.isEmpty else { return }
+        catalog = tracks
+        recomputePreview()
     }
 
     // MARK: - Voting
