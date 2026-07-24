@@ -1,0 +1,54 @@
+# XcodeGen spec — generates Swell.xcodeproj deterministically.
+#
+#   brew install xcodegen   # once
+#   xcodegen generate       # produces the .xcodeproj
+#   open Swell.xcodeproj
+#
+# Regenerating from this file means the project is reviewable as plain text and
+# never carries a hand-merged pbxproj conflict.
+
+name: Swell
+options:
+  bundleIdPrefix: fm.swell
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "" # set your team, or configure signing in Xcode
+
+targets:
+  RadioKit:
+    type: framework
+    platform: iOS
+    sources:
+      - Sources/RadioKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fm.swell.kit
+
+  Swell:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/SwellApp
+    dependencies:
+      - target: RadioKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fm.swell.app
+        INFOPLIST_FILE: Sources/SwellApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/SwellApp/Swell.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+
+  RadioKitTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/RadioKitTests
+    dependencies:
+      - target: RadioKit

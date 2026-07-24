@@ -1,0 +1,22 @@
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+xcuserdata/
+
+# XcodeGen output (regenerate with `xcodegen generate`)
+*.xcodeproj
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Signing / secrets — never commit
+*.mobileprovision
+*.p12
+secrets.xcconfig
