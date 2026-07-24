@@ -38,6 +38,10 @@ targets:
       - Sources/RadioPlusApp
     dependencies:
       - target: RadioKit
+    # Shared scheme so CI's xcodebuild can find it on a fresh checkout.
+    scheme:
+      testTargets:
+        - RadioKitTests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.radioplus.app
