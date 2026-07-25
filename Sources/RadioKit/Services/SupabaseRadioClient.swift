@@ -136,7 +136,62 @@ public struct SupabaseRadioClient: Sendable {
         return tracks
     }
 
+    /// How many listeners are live on a station: distinct heartbeats seen in
+    /// the trailing window. `since` is in **station time** — the server stamps
+    /// `last_seen` with its own clock, so the cutoff must be quoted against
+    /// that clock too, or a skewed device would over- or under-count.
+    ///
+    /// Uses a `Range: 0-0` + `Prefer: count=exact` read so the answer arrives
+    /// in the `Content-Range` header (`0-0/N`) and the body stays one row no
+    /// matter how big the audience gets.
+    public func fetchListenerCount(stationID: UUID, since: Date) async throws -> Int {
+        let url = endpoint(
+            "radio_listeners",
+            query: [
+                ("station_id", "eq.\(stationID.uuidString.lowercased())"),
+                ("last_seen", "gte.\(Self.postgresTimestamp(since))"),
+                ("select", "listener_key"),
+            ]
+        )
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("count=exact", forHTTPHeaderField: "Prefer")
+        request.setValue("0-0", forHTTPHeaderField: "Range")
+        applyKey(to: &request)
+
+        let (_, response) = try await session.data(for: request)
+        let http = try check(response)
+        guard
+            let header = http.value(forHTTPHeaderField: "Content-Range"),
+            let total = header.split(separator: "/").last,
+            let count = Int(total)
+        else { throw ClientError.malformed }
+        return count
+    }
+
     // MARK: - Writes
+
+    /// Mark this listener present on a station. An upsert on the
+    /// `(station_id, listener_key)` key — the first beat inserts, every later
+    /// one refreshes. `last_seen` is stamped server-side by trigger, so the
+    /// body carries no clock and a device with a wrong one can't fake
+    /// freshness. Fire-and-forget cadence: once per poll is plenty, since the
+    /// presence window is a couple of polls wide.
+    public func sendHeartbeat(stationID: UUID, listenerKey: String) async throws {
+        var request = URLRequest(url: endpoint("radio_listeners"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+        applyKey(to: &request)
+        let body = HeartbeatInsert(
+            station_id: stationID.uuidString.lowercased(),
+            listener_key: listenerKey
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (_, response) = try await session.data(for: request)
+        try check(response)
+    }
 
     /// Cast a boost or bury. Fire-and-forget from the caller's view — the
     /// server re-tallies and the next `radio_now_playing` update reflects it.
@@ -285,6 +340,11 @@ public struct SupabaseRadioClient: Sendable {
         let direction: Int
     }
 
+    private struct HeartbeatInsert: Encodable {
+        let station_id: String
+        let listener_key: String
+    }
+
     // MARK: - Parsing helpers
 
     /// PostgREST can render `timestamptz` a few ways depending on version —
@@ -326,12 +386,23 @@ public struct SupabaseRadioClient: Sendable {
         return nil
     }
 
+    /// Render a `Date` the way PostgREST filters expect: ISO-8601 UTC. Whole
+    /// seconds only — presence windows are tens of seconds wide, so
+    /// sub-second precision buys nothing.
+    static func postgresTimestamp(_ date: Date) -> String {
+        plainISOFormatter.string(from: date)
+    }
+
+    private static let plainISOFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private static let isoFormatters: [ISO8601DateFormatter] = {
         let withFraction = ISO8601DateFormatter()
         withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        return [withFraction, plain]
+        return [withFraction, plainISOFormatter]
     }()
 
     private static let httpDateFormatter: DateFormatter = {

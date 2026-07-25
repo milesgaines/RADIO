@@ -108,8 +108,9 @@ Launch arguments: `-RadioBackend local` forces on-device rotation,
 `-RadioStationID <uuid>` picks a specific live station. Most of the live
 catalog streams (47 of 58 tracks carry an `audio_url` — Supabase storage and
 Audius); a track without one plays as synced metadata until the backend fills
-it in. Still ahead: live listener counts. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+it in. The listener count is live too: each device heartbeats
+`radio_listeners` once a poll and shows the count of beats in the trailing
+window. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Trademark / legal
 
