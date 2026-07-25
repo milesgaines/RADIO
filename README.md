@@ -29,7 +29,7 @@ repo, straight from the GitHub API.
 
 | Path | Role |
 |---|---|
-| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the Navidrome/Subsonic client, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
+| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the station schedule + shared clock, the Navidrome/Subsonic client, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
 | `Sources/RadioPlusApp/` | The iOS app: scene routing, `LiveView` (the stage), `OpenSourceView`, `SettingsView` (Navidrome), `CarPlaySceneDelegate` (templates). |
 | `Tests/RadioKitTests/` | Unit tests pinning the design invariants (no dead air, boost-wins-more, superfans can't dominate, unlicensed never plays…). |
 | `project.yml` | XcodeGen spec — the `.xcodeproj` is generated, not committed. |
@@ -84,12 +84,31 @@ as the phone. See [`docs/CARPLAY.md`](docs/CARPLAY.md).
 
 ## Status
 
-The rotation/voting/anti-gaming logic is real and tested, and the player can
-stream a real Navidrome library. Still simulated: the *shared* clock (each
-device currently advances its own rotation locally — production needs a small
-server running the same `WeightedRotationEngine` and pushing "current track +
-start time" over a websocket so every listener is in sync). That swap is
-isolated to `LiveStreamService`; nothing else changes. See
+The rotation/voting/anti-gaming logic is real and tested, the player can
+stream a real Navidrome library — and **the shared clock is live**.
+
+`LiveStreamService` no longer decides what plays: it renders a timeline handed
+to it by a `StationScheduleSource`, and `StationClock` converts the station's
+clock to this device's so a phone that's a minute fast still joins the track
+at the right second. Three sources ship:
+
+- **`SupabaseScheduleSource`** — *the default.* Tunes to the live OneSync
+  station: the backend's `radio_advance_stations()` rotates every station
+  server-side and publishes `radio_now_playing`; the app polls it (about one
+  request per song), disciplines its clock off each response's `Date` header,
+  and rides a Supabase Realtime nudge for instant track changes. Votes POST to
+  `radio_votes`. Every listener hears the same second.
+- **`LocalScheduleSource`** — the rotation engine on-device: offline, demo,
+  and Navidrome listening (each listener their own copy of the station).
+- **`RemoteScheduleSource`** — a generic websocket schedule feed for
+  self-hosters, wire format documented on the type
+  (`-StationFeedURL wss://…`).
+
+Launch arguments: `-RadioBackend local` forces on-device rotation,
+`-RadioStationID <uuid>` picks a specific live station. Most of the live
+catalog streams (47 of 58 tracks carry an `audio_url` — Supabase storage and
+Audius); a track without one plays as synced metadata until the backend fills
+it in. Still ahead: live listener counts. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Trademark / legal
