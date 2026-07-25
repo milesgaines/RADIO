@@ -40,7 +40,7 @@ xcodebuild -exportArchive -archivePath "$ARCHIVE" \
   -authenticationKeyID "$PROV_KEY_ID" \
   -authenticationKeyIssuerID "$ASC_ISSUER_ID"
 
-IPA=$(/usr/bin/find "$EXPORT" -name '*.ipa' | head -1)
+IPA=$(/usr/bin/find "$EXPORT" -name '*.ipa' -newer "$ARCHIVE" | head -1)  # never grab a stale export
 echo "▸ Uploading $IPA…"
 xcrun altool --upload-app -f "$IPA" -t ios \
   --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
