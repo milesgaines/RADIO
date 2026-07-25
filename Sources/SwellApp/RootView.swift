@@ -41,6 +41,8 @@ private struct PlateView: View {
         services.streams.firstIndex(where: { $0 === stream }) ?? 0
     }
     private var accent: Color { CymaticPlate.accents[accentIndex % CymaticPlate.accents.count] }
+    /// Every station gets a spot on the dial. Fictional, but honest fiction.
+    private var frequency: Double { 88.1 + Double(accentIndex) * 6.4 }
 
     var body: some View {
         GeometryReader { geo in
@@ -157,49 +159,66 @@ private struct PlateView: View {
             .padding(.horizontal, 22)
             .padding(.top, 6)
 
+            // THE STATION IS THE STAR. The song is just what's on air.
+            HStack(alignment: .lastTextBaseline, spacing: 14) {
+                Text(String(format: "%.1f", frequency))
+                    .font(.custom("Gasoek One", size: 66))
+                    .foregroundStyle(bone)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.6), value: frequency)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(stream.station.name.uppercased())
+                        .font(.custom("Gasoek One", size: 24))
+                        .foregroundStyle(accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    HStack(spacing: 8) {
+                        Text("FM")
+                            .font(.custom("Archivo Black", size: 11))
+                            .foregroundStyle(bone.opacity(0.5))
+                        SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
+                    }
+                }
+            }
+            .shadow(color: ink.opacity(0.6), radius: 12)
+
             Spacer()
 
+            // Broadcast tickers, not a track hero.
             if let np = stream.nowPlaying {
-                Text(np.track.title)
-                    .font(.custom("Gasoek One", size: heroSize(np.track.title)))
-                    .foregroundStyle(bone)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.5)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .shadow(color: ink.opacity(0.6), radius: 12)
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.5), value: np.track.id)
-
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(np.track.artistName)
-                        .font(.custom("Instrument Serif", size: 24))
-                        .foregroundStyle(bone.opacity(0.7))
-                    if np.boostScore != 0 {
-                        Text(np.boostScore > 0 ? "▲ \(np.boostScore)" : "▼ \(-np.boostScore)")
-                            .font(.custom("Archivo Black", size: 13))
-                            .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.4))
-                            .monospacedDigit()
-                            .contentTransition(.numericText())
-                            .animation(.snappy, value: np.boostScore)
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 8) {
+                        Text("ON AIR NOW")
+                            .font(.custom("Archivo Black", size: 10))
+                            .tracking(1.5)
+                            .foregroundStyle(accent)
+                        Ticker(text: "\(np.track.title) — \(np.track.artistName)"
+                               + (np.track.albumTitle.map { " — \($0)" } ?? ""),
+                               font: .custom("Instrument Serif", size: 19),
+                               color: bone)
+                        if np.boostScore != 0 {
+                            Text(np.boostScore > 0 ? "▲\(np.boostScore)" : "▼\(-np.boostScore)")
+                                .font(.custom("Archivo Black", size: 12))
+                                .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.4))
+                                .monospacedDigit()
+                                .contentTransition(.numericText())
+                                .animation(.snappy, value: np.boostScore)
+                        }
+                    }
+                    if !stream.upNextPreview.isEmpty {
+                        HStack(spacing: 8) {
+                            Text("UP NEXT")
+                                .font(.custom("Archivo Black", size: 10))
+                                .tracking(1.5)
+                                .foregroundStyle(bone.opacity(0.45))
+                            Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "  ·  ")
+                                   + "  ·  crowd-programmed — your boost changes this",
+                                   font: .custom("Instrument Serif", size: 16),
+                                   color: bone.opacity(0.55), speed: 22)
+                        }
                     }
                 }
-
-                HStack(spacing: 8) {
-                    Text(stream.station.name.uppercased())
-                        .font(.custom("Archivo Black", size: 12))
-                        .tracking(1.5)
-                        .foregroundStyle(accent)
-                    Text("· \(accentIndex + 1)/\(services.streams.count)")
-                        .font(.custom("Archivo Black", size: 12))
-                        .foregroundStyle(bone.opacity(0.3))
-                    if let album = np.track.albumTitle {
-                        Text("· \(album.uppercased())")
-                            .font(.custom("Archivo Black", size: 11))
-                            .foregroundStyle(bone.opacity(0.3))
-                            .lineLimit(1)
-                    }
-                }
-                .padding(.top, 2)
             }
 
             ControlDeck(stream: stream, accent: accent) { direction in
@@ -221,15 +240,6 @@ private struct PlateView: View {
                     .id(name)
                     .allowsHitTesting(false)
             }
-        }
-    }
-
-    private func heroSize(_ title: String) -> CGFloat {
-        switch title.count {
-        case 0...8: return 68
-        case 9...14: return 52
-        case 15...22: return 40
-        default: return 32
         }
     }
 
@@ -270,6 +280,7 @@ private struct PlateView: View {
     private func tune(_ direction: Int) {
         let streams = services.streams
         let next = (accentIndex + direction + streams.count) % streams.count
+        plate.staticBurst() // between stations there is static
         services.tune(to: streams[next].station)
         let name = streams[next].station.name
         withAnimation(.easeIn(duration: 0.2)) { stationFlash = name }
@@ -354,6 +365,14 @@ final class CymaticPlate {
         strikeUntil = max(strikeUntil, Date().addingTimeInterval(0.3))
     }
 
+    /// Between stations there is static: every grain loses the signal for a
+    /// beat, then the new figure locks in.
+    private var staticUntil: Date = .distantPast
+    func staticBurst() {
+        staticUntil = Date().addingTimeInterval(0.55)
+    }
+    var isStatic: Bool { Date() < staticUntil }
+
     func stepAndDraw(in canvas: GraphicsContext, size: CGSize, date: Date) {
         if self.size != size { self.size = size }
         let dt = min(lastStep.map { date.timeIntervalSince($0) } ?? 1.0 / 60, 1.0 / 24)
@@ -374,6 +393,7 @@ final class CymaticPlate {
         // Excitation: silence freezes the figure; loudness makes it dance.
         var excite = isPlaying ? 0.10 + rms * 1.7 : 0.0
         if striking { excite += 1.4 }
+        if isStatic { excite += 3.5 } // tuning static: total signal loss
         let converge = collapsing ? 0.0 : 0.0038 * (dt * 60)  // gradient pull
         let jitter = excite * 0.05 * (dt * 60)
         let crawl = 0.0022 * (dt * 60) * (isPlaying ? 1 : 0.1)

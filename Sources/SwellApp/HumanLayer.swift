@@ -11,6 +11,68 @@ enum HumanTheme {
     static let dim = Color(red: 0.945, green: 0.925, blue: 0.878).opacity(0.55)
 }
 
+// MARK: - Broadcast furniture
+
+/// Signal-strength bars fed by the real program level — the radio-est
+/// possible status indicator.
+struct SignalBars: View {
+    let level: Float
+    let accent: Color
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(0..<5, id: \.self) { i in
+                Rectangle()
+                    .fill(Float(i) / 5.0 < level ? accent : HumanTheme.bone.opacity(0.15))
+                    .frame(width: 4, height: CGFloat(6 + i * 3))
+            }
+        }
+        .animation(.linear(duration: 0.12), value: Int(level * 5))
+    }
+}
+
+/// An always-moving broadcast ticker — station displays never sit still.
+struct Ticker: View {
+    let text: String
+    var font: Font
+    var color: Color
+    var speed: Double = 28
+
+    @State private var textWidth: CGFloat = 0
+    private let gap: CGFloat = 56
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: textWidth <= 0)) { ctx in
+            let span = textWidth + gap
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let offset = span > 0 ? CGFloat((t * speed).truncatingRemainder(dividingBy: span)) : 0
+            HStack(spacing: gap) {
+                label
+                label
+            }
+            .offset(x: -offset)
+        }
+        // minWidth 0 matters: without it, frame(maxWidth:) adopts the huge
+        // scrolling content's width and blows up the whole layout.
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        .frame(height: 24)
+        .clipped()
+        .background(
+            label.hidden().fixedSize().background(
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { textWidth = g.size.width }
+                        .onChange(of: g.size.width) { _, w in textWidth = w }
+                }
+            )
+        )
+    }
+
+    private var label: some View {
+        Text(text).font(font).foregroundStyle(color).lineLimit(1).fixedSize()
+    }
+}
+
 // MARK: - Control deck
 // Buttons for every gesture, so nothing about the radio is a secret.
 
@@ -23,9 +85,9 @@ struct ControlDeck: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            deckButton(icon: "chevron.left", label: "STATION") { onTune(-1) }
+            deckButton(icon: "chevron.left", label: "TUNE") { onTune(-1) }
 
-            deckButton(icon: "hand.thumbsdown.fill", label: "BURY", tint: HumanTheme.dim) {
+            deckButton(icon: "arrow.down", label: "BURY", tint: HumanTheme.dim) {
                 if let id = stream.nowPlaying?.track.id {
                     stream.vote(.bury, on: id)
                     Haptics.tap()
@@ -53,14 +115,14 @@ struct ControlDeck: View {
                 }
             }
 
-            deckButton(icon: "hand.thumbsup.fill", label: "BOOST", tint: accent) {
+            deckButton(icon: "arrow.up", label: "BOOST", tint: accent) {
                 if let id = stream.nowPlaying?.track.id {
                     stream.vote(.boost, on: id)
                     Haptics.boost()
                 }
             }
 
-            deckButton(icon: "chevron.right", label: "STATION") { onTune(1) }
+            deckButton(icon: "chevron.right", label: "TUNE") { onTune(1) }
         }
     }
 
@@ -106,7 +168,7 @@ struct WelcomeOverlay: View {
                     rule(icon: "dot.radiowaves.left.and.right", color: accent,
                          head: "One station, one moment",
                          body: "Everyone tuned in hears the same second you do. No skipping — it's radio.")
-                    rule(icon: "hand.thumbsup.fill", color: accent,
+                    rule(icon: "arrow.up.circle.fill", color: accent,
                          head: "The crowd programs it",
                          body: "BOOST songs you love, BURY ones you don't. Votes shape what plays next.")
                     rule(icon: "waveform", color: accent,
