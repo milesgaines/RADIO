@@ -159,17 +159,11 @@ struct WelcomeOverlay: View {
             VStack(alignment: .leading, spacing: 26) {
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("THIS IS\nLIVE RADIO")
-                        .font(.custom("Gasoek One", size: 40))
-                        .foregroundStyle(HumanTheme.bone)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Radio didn\u{2019}t lose because of Spotify. It lost when it stopped being radio. This one never stopped.")
-                        .font(.custom("Instrument Serif", size: 19))
-                        .foregroundStyle(HumanTheme.bone.opacity(0.85))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text("THIS IS\nLIVE RADIO")
+                    .font(.custom("Gasoek One", size: 40))
+                    .foregroundStyle(HumanTheme.bone)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 18) {
                     rule(icon: "dot.radiowaves.left.and.right", color: accent,
@@ -187,7 +181,7 @@ struct WelcomeOverlay: View {
                 }
 
                 Button(action: onStart) {
-                    Text("PUT ME ON THE AIR")
+                    Text("START LISTENING")
                         .font(.custom("Archivo Black", size: 15))
                         .tracking(2)
                         .foregroundStyle(HumanTheme.ink)
@@ -196,11 +190,6 @@ struct WelcomeOverlay: View {
                         .background(accent)
                 }
                 .padding(.top, 6)
-
-                Text("Live, spontaneous, human, crowd-programmed. Flagship at 105.9 — some frequencies belong to somebody.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(HumanTheme.dim.opacity(0.8))
-                    .fixedSize(horizontal: false, vertical: true)
 
                 Spacer().frame(height: 20)
             }
@@ -241,15 +230,9 @@ struct ProfileSheet: View {
 
         VStack(alignment: .leading, spacing: 24) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("PROGRAM DIRECTOR")
-                        .font(.custom("Archivo Black", size: 10))
-                        .tracking(2)
-                        .foregroundStyle(accent)
-                    Text("YOUR SIGNAL")
-                        .font(.custom("Gasoek One", size: 30))
-                        .foregroundStyle(HumanTheme.bone)
-                }
+                Text("YOUR SIGNAL")
+                    .font(.custom("Gasoek One", size: 30))
+                    .foregroundStyle(HumanTheme.bone)
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
@@ -280,7 +263,7 @@ struct ProfileSheet: View {
                     }
                 }
                 .frame(height: 6)
-                Text("Your vote weighs more the longer you genuinely listen. It can't be bought and bots can't fake it — that's what keeps the station honest.")
+                Text("Vote weight grows with listening time. Bots can't fake it.")
                     .font(.system(size: 13))
                     .foregroundStyle(HumanTheme.dim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -291,24 +274,15 @@ struct ProfileSheet: View {
                 divider
                 statRow("LISTENER SINCE", listener.createdAt.formatted(date: .abbreviated, time: .omitted))
                 divider
-                statRow("RECORDS WITNESSED", "\(services.airLog.playCount)")
+                statRow("PLAYS LOGGED", "\(services.airLog.playCount)")
                 divider
-                statRow("BOOSTS RIDING", "\(services.airLog.wagerCount) waiting to air")
+                statRow("BOOSTS PENDING", "\(services.airLog.wagerCount)")
                 divider
-                statRow("TIMES THEY PLAYED YOURS", "\(services.airLog.payoffCount)")
+                statRow("BOOSTS AIRED", "\(services.airLog.payoffCount)")
                 divider
-                statRow("VERIFIED", listener.isVerified ? "YES" : "NOT YET")
+                statRow("VERIFIED", listener.isVerified ? "YES" : "NO")
             }
             .overlay(Rectangle().strokeBorder(HumanTheme.bone.opacity(0.15), lineWidth: 1))
-
-            Text("Keep the radio on. Your signal strengthens with every real hour.")
-                .font(.custom("Instrument Serif", size: 17))
-                .foregroundStyle(HumanTheme.dim)
-
-            Text("Build something people remember \u{2014} not something they scroll past.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(HumanTheme.dim.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }

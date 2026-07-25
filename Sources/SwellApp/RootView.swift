@@ -267,8 +267,7 @@ private struct PlateView: View {
                                 .tracking(1.5)
                                 .foregroundStyle(bone.opacity(0.45))
                             Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "  ·  ")
-                                   + "  ·  crowd-programmed — your boost changes this"
-                                   + "  ·  radio didn't lose — it stopped being radio · not this one · 105.9",
+                                   + "  ·  crowd-programmed",
                                    font: .custom("Instrument Serif", size: 16),
                                    color: bone.opacity(0.55), speed: 22)
                         }
