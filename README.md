@@ -105,10 +105,11 @@ at the right second. Three sources ship:
   (`-StationFeedURL wss://…`).
 
 Launch arguments: `-RadioBackend local` forces on-device rotation,
-`-RadioStationID <uuid>` picks a specific live station. What's still ahead:
-the backend serving `audio_url`s for its tracks (metadata and votes sync
-today; the audio stream arrives when those columns are filled), and listener
-counts. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+`-RadioStationID <uuid>` picks a specific live station. Most of the live
+catalog streams (47 of 58 tracks carry an `audio_url` — Supabase storage and
+Audius); a track without one plays as synced metadata until the backend fills
+it in. Still ahead: live listener counts. See
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Trademark / legal
 
