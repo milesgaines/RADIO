@@ -75,6 +75,11 @@ public final class LiveStreamService: ObservableObject {
 
     private func runLoop() async {
         while !Task.isCancelled {
+            // Server clock speaking → local rotation stands down.
+            if remoteClockActive {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                continue
+            }
             guard let np = nowPlaying else {
                 advance()
                 if nowPlaying == nil {
@@ -128,6 +133,33 @@ public final class LiveStreamService: ObservableObject {
     }
 
     // MARK: - Real backend feeds
+
+    /// When the server's shared clock is speaking, local rotation yields:
+    /// the station director decides what's on air; this device renders it.
+    /// If the clock goes quiet (offline, backend down) the local engine
+    /// resumes — the station never dies.
+    private var lastRemoteClockAt: Date?
+    private var remoteClockActive: Bool {
+        guard let last = lastRemoteClockAt else { return false }
+        let currentDuration = nowPlaying?.track.durationSeconds ?? 300
+        return now().timeIntervalSince(last) < currentDuration + 60
+    }
+
+    /// Apply the server's now-playing row. Unknown track ids (catalog
+    /// mismatch) are ignored and local rotation continues.
+    public func applyRemoteClock(trackID: UUID, startedAt: Date) {
+        guard let track = catalog.first(where: { $0.id == trackID }) else { return }
+        lastRemoteClockAt = now()
+        guard nowPlaying?.track.id != trackID || nowPlaying?.startedAt != startedAt else { return }
+        history.append(.init(trackID: track.id, artistID: track.artistID, playedAt: startedAt))
+        nowPlaying = NowPlaying(
+            track: track,
+            startedAt: startedAt,
+            boostScore: currentBoostScore(for: track.id),
+            liveListeners: displayListenerCount
+        )
+        recomputePreview()
+    }
 
     /// True presence from the backend. Once set, it replaces the local
     /// roster count everywhere the audience number surfaces.

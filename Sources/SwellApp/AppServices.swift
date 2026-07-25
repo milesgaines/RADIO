@@ -90,6 +90,11 @@ final class AppServices: ObservableObject {
                 direction > 0 ? .boost : .bury, on: trackID, fromKey: fromKey
             )
         }
+        // The shared clock: the server says what's on air and when it
+        // started; every device renders the same second.
+        backend.onRemoteClock = { [weak self] trackID, startedAt, _ in
+            self?.activeStream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
+        }
         backend.tune(toStationID: active.station.id.uuidString)
 
         // Listening tenure accrues while playback runs...

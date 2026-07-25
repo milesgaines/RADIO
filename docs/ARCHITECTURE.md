@@ -72,6 +72,13 @@ is covered by unit tests.
 
 ## Swapping the mock for production
 
+> **Status: the swap happened.** As of 2026-07-25 the production
+> architecture below is live: the station director runs in Supabase
+> (`radio_advance_stations()` on a 7-second pg_cron heartbeat, writing
+> `radio_now_playing`), clients render the server clock and seek to the
+> live edge, presence and votes stream over Realtime, and the local
+> engine remains only as the offline fallback so the station never dies.
+
 1. Replace `MockCatalog` with a client that returns only masters carrying an
    interactive direct license from OneSync (`interactiveLicenseGranted == true`).
 2. Replace `LiveStreamService`'s timer-driven `advance()` with a websocket

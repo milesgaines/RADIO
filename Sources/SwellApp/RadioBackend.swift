@@ -23,6 +23,35 @@ final class RadioBackend {
 
     var onPresenceCount: (Int) -> Void = { _ in }
     var onRemoteVote: (_ trackID: UUID, _ direction: Int, _ fromKey: String) -> Void = { _, _, _ in }
+    /// The shared clock: what the SERVER says is on air for the tuned
+    /// station, and exactly when it started.
+    var onRemoteClock: (_ trackID: UUID, _ startedAt: Date, _ duration: Double) -> Void = { _, _, _ in }
+
+    private struct NowRow: Decodable {
+        let station_id: UUID
+        let track_id: UUID
+        let started_at: Date
+        let duration_seconds: Double
+    }
+
+    /// Postgres timestamptz arrives with microseconds ("…08.123456+00:00"),
+    /// which ISO8601DateFormatter rejects — parse the common shapes directly.
+    private static let pgDateFormats: [DateFormatter] = {
+        ["yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX",
+         "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+         "yyyy-MM-dd'T'HH:mm:ssXXXXX"].map { pattern in
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.timeZone = TimeZone(identifier: "UTC")
+            df.dateFormat = pattern
+            return df
+        }
+    }()
+
+    private static func parseDate(_ raw: String) -> Date? {
+        for f in pgDateFormats { if let d = f.date(from: raw) { return d } }
+        return nil
+    }
 
     init(listenerKey: String) {
         self.listenerKey = listenerKey
@@ -89,13 +118,60 @@ final class RadioBackend {
                 }
             }
 
+            // The shared clock: every change to this station's now_playing
+            // row, live. The server decides what's on air; we render it.
+            let clockChanges = newChannel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "radio_now_playing"
+            )
+            let clockTask = Task { [weak self] in
+                for await change in clockChanges {
+                    guard let self else { return }
+                    let record: [String: AnyJSON]
+                    switch change {
+                    case .insert(let a): record = a.record
+                    case .update(let a): record = a.record
+                    default: continue
+                    }
+                    guard
+                        case let .string(rowStation)? = record["station_id"],
+                        rowStation.caseInsensitiveCompare(stationID) == .orderedSame,
+                        case let .string(rawTrack)? = record["track_id"],
+                        let trackID = UUID(uuidString: rawTrack),
+                        case let .string(rawStart)? = record["started_at"],
+                        let startedAt = Self.parseDate(rawStart)
+                    else { continue }
+                    let duration: Double
+                    switch record["duration_seconds"] {
+                    case .double(let d)?: duration = d
+                    case .integer(let i)?: duration = Double(i)
+                    case .string(let s)?: duration = Double(s) ?? 0
+                    default: duration = 0
+                    }
+                    self.onRemoteClock(trackID, startedAt, duration)
+                }
+            }
+
             await MainActor.run {
                 self.streamTasks.append(presenceTask)
                 self.streamTasks.append(votesTask)
+                self.streamTasks.append(clockTask)
             }
 
             await newChannel.subscribe()
             try? await newChannel.track(state: ["listener": .string(self.listenerKey)])
+
+            // Join mid-song correctly: fetch what's on air right now.
+            if let row: NowRow = try? await self.client
+                .from("radio_now_playing")
+                .select()
+                .eq("station_id", value: stationID)
+                .single()
+                .execute()
+                .value {
+                self.onRemoteClock(row.track_id, row.started_at, row.duration_seconds)
+            }
         }
         streamTasks.append(task)
     }
