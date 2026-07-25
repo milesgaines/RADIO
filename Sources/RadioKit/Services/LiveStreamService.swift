@@ -114,6 +114,12 @@ public final class LiveStreamService: ObservableObject {
     /// Everyone currently tuned in (including the device's listener).
     public var audienceCount: Int { listeners.count }
 
+    /// Votes this device's listener has cast on this station this session —
+    /// surfaced in the profile so voting feels owned, not fire-and-forget.
+    public var myVoteCount: Int {
+        votes.filter { $0.listenerID == currentListener.id }.count
+    }
+
     /// Replace the stored profile for the device's listener — used when
     /// persisted listening tenure accrues, so vote trust reflects it.
     public func refreshCurrentListener(_ updated: Listener) {

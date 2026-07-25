@@ -30,8 +30,9 @@ private struct PlateView: View {
     @EnvironmentObject private var player: RadioPlayer
 
     @State private var plate = CymaticPlate()
-    @State private var showHints = true
     @State private var stationFlash: String?
+    @State private var showProfile = false
+    @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -74,15 +75,27 @@ private struct PlateView: View {
                 .allowsHitTesting(false)
 
                 chrome(in: geo.size)
+
+                if showWelcome {
+                    WelcomeOverlay(accent: accent) {
+                        UserDefaults.standard.set(true, forKey: "swell.welcomed")
+                        withAnimation(.easeOut(duration: 0.5)) { showWelcome = false }
+                        player.play()
+                        plate.isPlaying = true
+                        Haptics.boost()
+                    }
+                    .transition(.opacity)
+                    .zIndex(2)
+                }
             }
             .contentShape(Rectangle())
             .gesture(gestures(in: geo.size))
+            .sheet(isPresented: $showProfile) {
+                ProfileSheet(stream: stream, accent: accent)
+            }
             .onAppear {
                 plate.configure(size: geo.size)
                 sync()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
-                    withAnimation(.easeOut(duration: 1.2)) { showHints = false }
-                }
             }
             .onChange(of: stream.nowPlaying?.track.id) { sync() }
             .onChange(of: player.isPlaying) { plate.isPlaying = player.isPlaying }
@@ -108,17 +121,37 @@ private struct PlateView: View {
                     .font(.custom("Gasoek One", size: 22))
                     .foregroundStyle(bone)
                 Spacer()
-                HStack(spacing: 6) {
-                    if player.isPlaying {
-                        Circle().fill(accent).frame(width: 6, height: 6)
+                HStack(spacing: 12) {
+                    HStack(spacing: 6) {
+                        if player.isPlaying {
+                            Circle().fill(accent).frame(width: 6, height: 6)
+                        }
+                        Text(player.isPlaying
+                             ? "LIVE · \(stream.nowPlaying?.liveListeners ?? 1)"
+                             : "RESTING")
+                            .font(.custom("Archivo Black", size: 12))
+                            .tracking(1)
+                            .foregroundStyle(bone.opacity(0.6))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .fixedSize()
                     }
-                    Text(player.isPlaying
-                         ? "LIVE · \(stream.nowPlaying?.liveListeners ?? 1)"
-                         : "RESTING")
-                        .font(.custom("Archivo Black", size: 12))
-                        .tracking(1)
-                        .foregroundStyle(bone.opacity(0.6))
-                        .monospacedDigit()
+                    Button { showProfile = true } label: {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(bone.opacity(0.8))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().strokeBorder(bone.opacity(0.25), lineWidth: 1))
+                    }
+                    Button {
+                        withAnimation(.easeIn(duration: 0.3)) { showWelcome = true }
+                    } label: {
+                        Image(systemName: "questionmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(bone.opacity(0.8))
+                            .frame(width: 34, height: 34)
+                            .background(Circle().strokeBorder(bone.opacity(0.25), lineWidth: 1))
+                    }
                 }
             }
             .padding(.horizontal, 22)
@@ -169,13 +202,11 @@ private struct PlateView: View {
                 .padding(.top, 2)
             }
 
-            if showHints {
-                Text("flick ↑ boost   ↓ bury   ← → tune   tap play")
-                    .font(.custom("Instrument Serif", size: 18))
-                    .foregroundStyle(bone.opacity(0.4))
-                    .padding(.top, 10)
-                    .transition(.opacity)
+            ControlDeck(stream: stream, accent: accent) { direction in
+                tune(direction)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 16)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 22)
@@ -188,9 +219,9 @@ private struct PlateView: View {
                     .shadow(color: ink, radius: 20)
                     .transition(.scale(scale: 1.1).combined(with: .opacity))
                     .id(name)
+                    .allowsHitTesting(false)
             }
         }
-        .allowsHitTesting(false)
     }
 
     private func heroSize(_ title: String) -> CGFloat {
