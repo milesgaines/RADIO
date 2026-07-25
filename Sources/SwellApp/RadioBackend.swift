@@ -21,11 +21,14 @@ final class RadioBackend {
     /// Stable per-device identity — the persisted listener id.
     let listenerKey: String
 
-    var onPresenceCount: (Int) -> Void = { _ in }
-    var onRemoteVote: (_ trackID: UUID, _ direction: Int, _ fromKey: String) -> Void = { _, _, _ in }
+    /// Every callback names the station it belongs to, so a slow response
+    /// that lands after a station switch is routed to the *right* stream —
+    /// never to "whichever stream is active at delivery time".
+    var onPresenceCount: (_ count: Int, _ stationID: String) -> Void = { _, _ in }
+    var onRemoteVote: (_ trackID: UUID, _ direction: Int, _ fromKey: String, _ stationID: String) -> Void = { _, _, _, _ in }
     /// The shared clock: what the SERVER says is on air for the tuned
     /// station, and exactly when it started.
-    var onRemoteClock: (_ trackID: UUID, _ startedAt: Date, _ duration: Double) -> Void = { _, _, _ in }
+    var onRemoteClock: (_ trackID: UUID, _ startedAt: Date, _ duration: Double, _ stationID: String) -> Void = { _, _, _, _ in }
 
     private struct NowRow: Decodable {
         let station_id: UUID
@@ -97,16 +100,16 @@ final class RadioBackend {
                 await oldChannel.unsubscribe()
                 await self?.client.removeChannel(oldChannel)
             }
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, self.channel === newChannel else { return }
 
             // Presence: the channel's live membership IS the listener count.
             let presences = newChannel.presenceChange()
             let presenceTask = Task { [weak self] in
                 for await change in presences {
-                    guard let self else { return }
+                    guard let self, self.channel === newChannel else { return }
                     for join in change.joins.keys { self.presentKeys.insert(join) }
                     for leave in change.leaves.keys { self.presentKeys.remove(leave) }
-                    self.onPresenceCount(max(1, self.presentKeys.count))
+                    self.onPresenceCount(max(1, self.presentKeys.count), stationID)
                 }
             }
 
@@ -118,7 +121,7 @@ final class RadioBackend {
             )
             let votesTask = Task { [weak self] in
                 for await insert in inserts {
-                    guard let self else { return }
+                    guard let self, self.channel === newChannel else { return }
                     let record = insert.record
                     guard
                         case let .string(rowStation)? = record["station_id"],
@@ -135,7 +138,7 @@ final class RadioBackend {
                     case .string(let s)?: direction = Int(s) ?? 1
                     default: direction = 1
                     }
-                    self.onRemoteVote(trackID, direction, fromKey)
+                    self.onRemoteVote(trackID, direction, fromKey, stationID)
                 }
             }
 
@@ -148,7 +151,7 @@ final class RadioBackend {
             )
             let clockTask = Task { [weak self] in
                 for await change in clockChanges {
-                    guard let self else { return }
+                    guard let self, self.channel === newChannel else { return }
                     let record: [String: AnyJSON]
                     switch change {
                     case .insert(let a): record = a.record
@@ -170,7 +173,24 @@ final class RadioBackend {
                     case .string(let s)?: duration = Double(s) ?? 0
                     default: duration = 0
                     }
-                    self.onRemoteClock(trackID, startedAt, duration)
+                    self.onRemoteClock(trackID, startedAt, duration, stationID)
+                }
+            }
+
+            // Every (re)join — first subscribe, socket auto-reconnect,
+            // foreground after background — runs the same recovery: presence
+            // resets to the fresh authoritative state, this device re-tracks
+            // itself, and the now_playing row is re-fetched (Realtime has no
+            // event replay, so any clock tick missed while offline is gone
+            // unless we ask).
+            let statuses = newChannel.statusChange
+            let statusTask = Task { [weak self] in
+                for await status in statuses {
+                    guard let self, self.channel === newChannel else { return }
+                    guard status == .subscribed else { continue }
+                    self.presentKeys.removeAll()
+                    try? await newChannel.track(state: ["listener": .string(self.listenerKey)])
+                    await self.fetchNowPlaying(stationID: stationID, on: newChannel)
                 }
             }
 
@@ -178,23 +198,44 @@ final class RadioBackend {
                 self.streamTasks.append(presenceTask)
                 self.streamTasks.append(votesTask)
                 self.streamTasks.append(clockTask)
+                self.streamTasks.append(statusTask)
             }
 
-            await newChannel.subscribe()
-            try? await newChannel.track(state: ["listener": .string(self.listenerKey)])
+            // Join failures (launch offline, mid-transition) must not kill
+            // realtime for the whole session: keep retrying while this is
+            // still the tuned station.
+            var backoff: UInt64 = 1_000_000_000
+            while !Task.isCancelled, self.channel === newChannel {
+                do {
+                    try await newChannel.subscribeWithError()
+                    break // statusTask takes it from here (and on every rejoin)
+                } catch {
+                    try? await Task.sleep(nanoseconds: backoff)
+                    backoff = min(backoff * 2, 30_000_000_000)
+                }
+            }
+        }
+        streamTasks.append(task)
+    }
 
-            // Join mid-song correctly: fetch what's on air right now.
-            if let row: NowRow = try? await self.client
+    /// Fetch the shared clock's current row, with a couple of retries — a
+    /// transient failure here would otherwise mean minutes of wrong-track.
+    private func fetchNowPlaying(stationID: String, on channel: RealtimeChannelV2) async {
+        for attempt in 0..<3 {
+            guard self.channel === channel else { return }
+            if let row: NowRow = try? await client
                 .from("radio_now_playing")
                 .select()
                 .eq("station_id", value: stationID)
                 .single()
                 .execute()
                 .value {
-                self.onRemoteClock(row.track_id, row.started_at, row.duration_seconds)
+                guard self.channel === channel else { return }
+                onRemoteClock(row.track_id, row.started_at, row.duration_seconds, stationID)
+                return
             }
+            try? await Task.sleep(nanoseconds: UInt64(1 << attempt) * 1_000_000_000)
         }
-        streamTasks.append(task)
     }
 
     /// Cast this device's vote into the shared stream. Fire-and-forget;

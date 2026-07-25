@@ -100,34 +100,44 @@ final class AppServices: ObservableObject {
         streams.forEach { $0.start() }
 
         // Real numbers in: presence → the listener count, remote votes →
-        // the live tally of whichever station this device is tuned to.
-        backend.onPresenceCount = { [weak self] count in
-            self?.activeStream.setLiveListenerCount(count)
+        // the live tally. Every event names its station, and is routed to
+        // THAT station's stream — a slow response arriving after a station
+        // switch must never leak into the newly tuned station.
+        backend.onPresenceCount = { [weak self] count, stationID in
+            self?.stream(for: stationID)?.setLiveListenerCount(count)
         }
-        backend.onRemoteVote = { [weak self] trackID, direction, fromKey in
-            self?.activeStream.ingestRemoteVote(
+        backend.onRemoteVote = { [weak self] trackID, direction, fromKey, stationID in
+            self?.stream(for: stationID)?.ingestRemoteVote(
                 direction > 0 ? .boost : .bury, on: trackID, fromKey: fromKey
             )
         }
         // The shared clock: the server says what's on air and when it
         // started; every device renders the same second.
-        backend.onRemoteClock = { [weak self] trackID, startedAt, duration in
-            guard let self else { return }
-            let stream = self.activeStream
+        backend.onRemoteClock = { [weak self] trackID, startedAt, duration, stationID in
+            guard let self, let stream = self.stream(for: stationID) else { return }
             stream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
-            // Unknown track (the ALGO's server-side catalog): learn it,
-            // then apply the clock for real.
+            // Unknown track (the remote stations' server-side catalog):
+            // learn it, then apply the clock for real. Retried — one
+            // transient fetch failure must not silence the whole song.
             if stream.nowPlaying?.track.id != trackID {
                 Task { @MainActor in
-                    guard let row = await self.backend.fetchTrack(trackID),
-                          let raw = row.audio_url, let url = URL(string: raw) else { return }
-                    stream.upsertRemoteTrack(Track(
-                        id: row.track_id, title: row.title,
-                        artistID: row.artist_id, artistName: row.artist,
-                        durationSeconds: row.duration_seconds > 0 ? row.duration_seconds : duration,
-                        assetURL: url
-                    ))
-                    stream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
+                    for attempt in 0..<3 {
+                        if let row = await self.backend.fetchTrack(trackID) {
+                            // A row with no audio is unplayable by design —
+                            // skip it; the director moves on next tick.
+                            guard let raw = row.audio_url, !raw.isEmpty,
+                                  let url = URL(string: raw) else { return }
+                            stream.upsertRemoteTrack(Track(
+                                id: row.track_id, title: row.title,
+                                artistID: row.artist_id, artistName: row.artist,
+                                durationSeconds: row.duration_seconds > 0 ? row.duration_seconds : duration,
+                                assetURL: url
+                            ))
+                            stream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
+                            return
+                        }
+                        try? await Task.sleep(nanoseconds: UInt64(1 << attempt) * 2_000_000_000)
+                    }
                 }
             }
         }
@@ -151,6 +161,14 @@ final class AppServices: ObservableObject {
                 self?.pushListenerToTallies()
             }
             .store(in: &cancellables)
+    }
+
+    /// The stream owning a backend event, matched case-insensitively — the
+    /// app sends uppercase ids while Postgres row payloads arrive lowercase.
+    private func stream(for stationID: String) -> LiveStreamService? {
+        streams.first {
+            $0.station.id.uuidString.caseInsensitiveCompare(stationID) == .orderedSame
+        }
     }
 
     /// Point the player (and both UIs) at another always-on station.

@@ -41,8 +41,10 @@ public final class RadioPlayer: ObservableObject {
     /// Live measurement of the actual audio, ~30 Hz. `.zero` when paused.
     @Published public private(set) var levels: AudioLevels = .zero
 
-    private let engine = AVAudioEngine()
-    private let node = AVAudioPlayerNode()
+    // var, not let: a media-services reset kills the engine and it must be
+    // rebuilt from scratch (Apple's documented recovery path).
+    private var engine = AVAudioEngine()
+    private var node = AVAudioPlayerNode()
     private let analyzer = SpectrumAnalyzer()
 
     private var stream: LiveStreamService
@@ -113,6 +115,11 @@ public final class RadioPlayer: ObservableObject {
         isPlaying = false
         levels = .zero
         refreshNowPlayingInfo()
+        #if os(iOS)
+        // Hand the audio session back so Music/podcasts can resume.
+        engine.pause()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        #endif
     }
 
     public func toggle() { isPlaying ? pause() : play() }
@@ -130,12 +137,31 @@ public final class RadioPlayer: ObservableObject {
             return
         }
         if url.scheme == "https" || url.scheme == "http" {
+            // Go silent now — the old station's segment must not keep playing
+            // under this station's metadata while the download runs.
+            node.stop()
             let key = loadedKey
             let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("radio-\(np.track.id.uuidString).\(url.pathExtension.isEmpty ? "mp3" : url.pathExtension)")
             Task { @MainActor [weak self] in
                 if !FileManager.default.fileExists(atPath: cache.path) {
-                    guard let (tmp, _) = try? await URLSession.shared.download(from: url) else { return }
+                    // An HTTP 404/403 "succeeds" as a download of the error
+                    // body — caching that poisons the track forever. Only a
+                    // 200 payload may enter the cache.
+                    let fetched = try? await URLSession.shared.download(from: url)
+                    guard let (tmp, response) = fetched,
+                          (response as? HTTPURLResponse)?.statusCode == 200 else {
+                        // Reopen the door so the next publish (or our own
+                        // nudge below) can retry within this same song.
+                        guard let self, self.loadedKey == key else { return }
+                        self.loadedKey = nil
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        guard self.loadedKey == nil,
+                              let np2 = self.stream.nowPlaying,
+                              np2.track.id == np.track.id else { return }
+                        self.load(np2)
+                        return
+                    }
                     try? FileManager.default.moveItem(at: tmp, to: cache)
                 }
                 guard let self, self.loadedKey == key else { return } // stale
@@ -167,13 +193,27 @@ public final class RadioPlayer: ObservableObject {
             )
             // node.play() on a non-running engine raises an uncatchable
             // NSException — only play once the engine is genuinely up.
-            if isPlaying, startEngineIfNeeded() {
-                node.play()
+            if isPlaying {
+                if startEngineIfNeeded() {
+                    node.play()
+                } else {
+                    // Session refused (phone call, etc.) — the UI must not
+                    // claim "playing" over silence.
+                    isPlaying = false
+                    levels = .zero
+                }
             }
         } catch {
             // A bad asset must never kill the station — stay silent until
-            // the stream advances past it.
+            // the stream advances past it. A poisoned *cached* download is
+            // deleted (and the load key reopened) so the next airing retries
+            // instead of replaying the bad file forever.
             node.stop()
+            let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            if url.path.hasPrefix(cachesDir.path) {
+                try? FileManager.default.removeItem(at: url)
+                loadedKey = nil
+            }
         }
         refreshNowPlayingInfo()
     }
@@ -190,6 +230,11 @@ public final class RadioPlayer: ObservableObject {
     private func startEngineIfNeeded() -> Bool {
         installTapIfNeeded()
         if engine.isRunning { return true }
+        #if os(iOS)
+        // Activate only when playback genuinely begins — activating at init
+        // silences whatever the user was listening to before pressing play.
+        do { try AVAudioSession.sharedInstance().setActive(true) } catch { return false }
+        #endif
         engine.prepare()
         do {
             try engine.start()
@@ -211,6 +256,27 @@ public final class RadioPlayer: ObservableObject {
             let info = note.userInfo
             Task { @MainActor [weak self] in self?.handleInterruption(info) }
         }
+        // Headphones yanked / AirPods died: the platform convention is to
+        // PAUSE, never to blast the open speaker. This must win over the
+        // engine-config handler below, which would otherwise resume on the
+        // new (loudspeaker) route.
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt)
+                .flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
+            guard reason == .oldDeviceUnavailable else { return }
+            Task { @MainActor [weak self] in self?.pause() }
+        }
+        // The media daemon can crash and reset out from under us; the old
+        // engine is dead at that point and must be rebuilt.
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.recoverFromMediaServicesReset() }
+        }
         #endif
         NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
@@ -225,6 +291,22 @@ public final class RadioPlayer: ObservableObject {
     }
 
     #if os(iOS)
+    /// After a media-daemon reset the old engine object is unusable: build a
+    /// fresh graph, reassert the session category, and rejoin the live edge.
+    private func recoverFromMediaServicesReset() {
+        let wasPlaying = isPlaying
+        engine = AVAudioEngine()
+        node = AVAudioPlayerNode()
+        engine.attach(node)
+        tapInstalled = false
+        currentFormat = nil
+        loadedKey = nil
+        configureAudioSession()
+        if wasPlaying, let np = stream.nowPlaying {
+            load(np)
+        }
+    }
+
     private func handleInterruption(_ info: [AnyHashable: Any]?) {
         guard let raw = info?[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
@@ -271,9 +353,11 @@ public final class RadioPlayer: ObservableObject {
 
     private func configureAudioSession() {
         #if os(iOS)
+        // Category only — activation waits for actual playback
+        // (startEngineIfNeeded), so launching the app never interrupts
+        // another app's audio.
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .default)
-        try? session.setActive(true)
         #endif
     }
 

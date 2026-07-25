@@ -149,7 +149,10 @@ private struct PlateView: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(gestures(in: geo.size))
+            // While the welcome overlay is up, its button owns the touches —
+            // the deck's tap/flick gestures would otherwise swallow them
+            // (tap-to-play fired under the scrim instead of dismissing it).
+            .gesture(gestures(in: geo.size), including: showWelcome ? .subviews : .all)
             .sheet(isPresented: $showProfile) {
                 ProfileSheet(stream: stream, accent: accent)
             }
