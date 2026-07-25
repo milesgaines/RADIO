@@ -85,11 +85,17 @@ private struct PlateView: View {
                 .scaleEffect(1 + CGFloat(player.levels.bass) * 0.022)
                 .animation(.linear(duration: 0.09), value: Int(player.levels.bass * 10))
 
-                // Bottom scrim so type reads over the densest sand — a wash,
-                // not a card.
+                // Scrims so type reads over the densest sand — washes,
+                // not cards. Top third and bottom half get backing.
                 LinearGradient(
                     colors: [.clear, ink.opacity(0.7), ink],
                     startPoint: .center, endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                LinearGradient(
+                    colors: [ink.opacity(0.92), ink.opacity(0.55), .clear],
+                    startPoint: .top, endPoint: .init(x: 0.5, y: 0.45)
                 )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
@@ -196,9 +202,7 @@ private struct PlateView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("RADIO")
-                        .font(.custom("Gasoek One", size: 22))
-                        .foregroundStyle(bone)
+                    RadioPlusMark(size: 22, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
                     // Local, live, human — a station lives somewhere.
                     HStack(spacing: 5) {
                         Text("LOS ANGELES")
@@ -207,7 +211,7 @@ private struct PlateView: View {
                     }
                     .font(.custom("Archivo Black", size: 9))
                     .tracking(1.2)
-                    .foregroundStyle(bone.opacity(0.45))
+                    .foregroundStyle(bone.opacity(0.72))
                     .lineLimit(1)
                     .fixedSize()
                 }
@@ -222,7 +226,7 @@ private struct PlateView: View {
                              : "RESTING")
                             .font(.custom("Archivo Black", size: 12))
                             .tracking(1)
-                            .foregroundStyle(bone.opacity(0.6))
+                            .foregroundStyle(bone.opacity(0.85))
                             .monospacedDigit()
                             .lineLimit(1)
                             .fixedSize()
@@ -270,7 +274,8 @@ private struct PlateView: View {
                     SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
                 }
             }
-            .shadow(color: ink.opacity(0.7), radius: 14)
+            .shadow(color: ink, radius: 4)
+            .shadow(color: ink.opacity(0.85), radius: 18)
 
             Spacer()
 
@@ -301,11 +306,11 @@ private struct PlateView: View {
                             Text("UP NEXT")
                                 .font(.custom("Archivo Black", size: 10))
                                 .tracking(1.5)
-                                .foregroundStyle(bone.opacity(0.45))
+                                .foregroundStyle(bone.opacity(0.65))
                             Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "  ·  ")
                                    + "  ·  crowd-programmed",
                                    font: .custom("Instrument Serif", size: 16),
-                                   color: bone.opacity(0.55), speed: 22)
+                                   color: bone.opacity(0.72), speed: 22)
                         }
                     }
                 }

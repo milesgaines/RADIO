@@ -127,6 +127,36 @@ public final class LiveStreamService: ObservableObject {
         listeners[updated.id] = updated
     }
 
+    // MARK: - Real backend feeds
+
+    /// True presence from the backend. Once set, it replaces the local
+    /// roster count everywhere the audience number surfaces.
+    private var externalListenerCount: Int?
+    public func setLiveListenerCount(_ count: Int) {
+        externalListenerCount = max(1, count)
+        refreshListenerCount()
+    }
+
+    var displayListenerCount: Int {
+        externalListenerCount ?? max(1, listeners.count)
+    }
+
+    /// A real vote from another device, off the realtime stream. The remote
+    /// listener gets a provisional trusted profile client-side; the
+    /// server-side tally replaces this approximation with the shared clock.
+    public func ingestRemoteVote(_ direction: VoteDirection, on trackID: UUID, fromKey key: String) {
+        let remoteID = FolderCatalog.stableID("remote-listener:\(key)")
+        if listeners[remoteID] == nil {
+            listeners[remoteID] = Listener(
+                id: remoteID,
+                createdAt: now().addingTimeInterval(-60 * 60 * 24 * 30),
+                isVerified: true,
+                lifetimeListeningSeconds: 60 * 60 * 30
+            )
+        }
+        castVote(direction, on: trackID, by: remoteID)
+    }
+
     // MARK: - Voting
 
     /// Boost or bury a track as the device's listener. Returns the new net tally.
@@ -167,7 +197,7 @@ public final class LiveStreamService: ObservableObject {
 
     private func refreshListenerCount() {
         guard var np = nowPlaying else { return }
-        np.liveListeners = max(1, listeners.count)
+        np.liveListeners = displayListenerCount
         nowPlaying = np
     }
 
@@ -195,7 +225,7 @@ public final class LiveStreamService: ObservableObject {
             track: track,
             startedAt: n,
             boostScore: currentBoostScore(for: track.id),
-            liveListeners: max(1, listeners.count)
+            liveListeners: displayListenerCount
         )
         recomputePreview()
     }

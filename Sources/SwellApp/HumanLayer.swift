@@ -73,6 +73,39 @@ struct Ticker: View {
     }
 }
 
+/// The RADIO+ mark. The word is set; the plus is *drawn* — a hot ember
+/// glyph with a glow pass that breathes with the live bass, so the brand
+/// itself is playing the record. Never typed as text, never static.
+struct RadioPlusMark: View {
+    var size: CGFloat = 22
+    var accent: Color
+    var level: Float = 0
+
+    var body: some View {
+        HStack(alignment: .top, spacing: size * 0.14) {
+            Text("RADIO")
+                .font(.custom("Gasoek One", size: size))
+                .foregroundStyle(HumanTheme.bone)
+                .fixedSize()
+            Canvas { ctx, sz in
+                let t = sz.width * 0.30 // bar thickness
+                let vBar = CGRect(x: (sz.width - t) / 2, y: 0, width: t, height: sz.height)
+                let hBar = CGRect(x: 0, y: (sz.height - t) / 2, width: sz.width, height: t)
+                var glow = ctx
+                glow.addFilter(.blur(radius: 3 + CGFloat(level) * 6))
+                glow.fill(Path(vBar), with: .color(accent.opacity(0.85)))
+                glow.fill(Path(hBar), with: .color(accent.opacity(0.85)))
+                ctx.fill(Path(vBar), with: .color(accent))
+                ctx.fill(Path(hBar), with: .color(accent))
+            }
+            .frame(width: size * 0.58, height: size * 0.58)
+            .scaleEffect(1 + CGFloat(level) * 0.28)
+            .animation(.linear(duration: 0.09), value: Int(level * 10))
+            .offset(y: size * 0.06)
+        }
+    }
+}
+
 /// The audience, visible: one ember per listener drifting up the edges of
 /// the room. Not a number — company.
 struct CrowdEmbers: View {
@@ -200,11 +233,14 @@ struct WelcomeOverlay: View {
             VStack(alignment: .leading, spacing: 26) {
                 Spacer()
 
-                Text("THIS IS\nLIVE RADIO")
-                    .font(.custom("Gasoek One", size: 40))
-                    .foregroundStyle(HumanTheme.bone)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 12) {
+                    RadioPlusMark(size: 30, accent: accent)
+                    Text("THIS IS\nLIVE RADIO")
+                        .font(.custom("Gasoek One", size: 40))
+                        .foregroundStyle(HumanTheme.bone)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 VStack(alignment: .leading, spacing: 18) {
                     rule(icon: "dot.radiowaves.left.and.right", color: accent,
