@@ -68,6 +68,9 @@ targets:
       base:
         # The registered App Store Connect bundle id for RADIOSPLUS.
         PRODUCT_BUNDLE_IDENTIFIER: RADIOPLUSAPP
+        # iPhone-only: the plate is a portrait phone instrument, and ASC
+        # rejects portrait-only bundles that also target iPad (error 90474).
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Sources/SwellApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/SwellApp/Swell.entitlements
         GENERATE_INFOPLIST_FILE: NO
