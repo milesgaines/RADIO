@@ -4,10 +4,13 @@ Guidance for AI assistants working in this repository.
 
 ## What this is
 
-**RADIO+** — a fan-voted live radio iOS app with a CarPlay surface. One
-always-on stream, everyone hears the same second, and listeners shape rotation
-by *boosting* and *burying* tracks. Swift 5.9, iOS 17 minimum, UIKit app
-delegate + SwiftUI, no third-party dependencies.
+**RADI0** (zero, not O — the zero is a record) — a fan-voted live radio iOS
+app with a planned CarPlay surface. One always-on stream, everyone hears the
+same second, and listeners shape rotation by *boosting* and *burying* tracks.
+Swift 5.9, iOS 17 minimum, UIKit app delegate + SwiftUI. The app target
+depends on `supabase-swift` (declared in `project.yml`); `RadioKit` itself has
+no third-party dependencies. App Store listing/bundle: "SWELL RADIO" /
+`com.onesync.swellradio`.
 
 Background reading, in order of usefulness: `docs/ARCHITECTURE.md` (module map,
 the shared-clock design, the finding→code table), `docs/CARPLAY.md` (what Apple
@@ -16,30 +19,35 @@ allows in-car and why), `docs/RESEARCH.md` (the strategy the product implements)
 
 ## Build, test, run
 
-There is **no `Package.swift`** — this is an Xcode project, not a SwiftPM
-package, so `swift build` / `swift test` do not apply. The `.xcodeproj` is
-gitignored and generated from `project.yml` by [XcodeGen].
+`Package.swift` builds **RadioKit and its unit tests only** — `swift test`
+is the fast loop for engine/service logic. The app itself is an Xcode project:
+the `.xcodeproj` is gitignored and generated from `project.yml` by [XcodeGen]
+(on this Mac, `xcodegen` lives at `~/.local/bin/xcodegen`, not Homebrew).
 
 ```bash
-brew install xcodegen      # once
-xcodegen generate          # regenerates RadioPlus.xcodeproj from project.yml
-open RadioPlus.xcodeproj   # ⌘R to run, ⌘U to test
+swift test                 # RadioKit unit suite, no simulator needed
+
+xcodegen generate          # regenerates Swell.xcodeproj from project.yml
+open Swell.xcodeproj       # ⌘R to run, ⌘U to test
 
 xcodebuild test \
-  -project RadioPlus.xcodeproj \
-  -scheme RadioPlus \
+  -project Swell.xcodeproj \
+  -scheme Swell \
   -destination 'platform=iOS Simulator,name=iPhone 15'
 ```
+
+TestFlight uploads go through `./ship.sh` (ASC API-key cloud signing).
+The `-SwellAutoPlay YES` launch argument autoplays on launch for demos.
 
 Sources are declared as **folders** in `project.yml`, so a new `.swift` file is
 picked up by re-running `xcodegen generate` — never hand-edit a `.pbxproj`, and
 never commit one.
 
-**This session's container is Linux with no Swift toolchain.** You cannot
-compile or run the tests here. Reason about Swift changes carefully, keep them
-small and type-obvious, and say plainly in your report that the change is
-unverified locally — CI (`.github/workflows/ci.yml`, `macos-15`) is what
-actually builds and tests it.
+**Cloud sessions may run on Linux with no Swift toolchain.** If you cannot
+compile, reason about Swift changes carefully, keep them small and
+type-obvious, and say plainly in your report that the change is unverified
+locally — CI (`.github/workflows/ci.yml`, `macos-15`) is what actually builds
+and tests it. On the user's Mac, run `swift test` before reporting done.
 
 CI runs two jobs on every PR: the iOS build + `RadioKitTests` on a simulator,
 and a Linux job that stands up a real Subsonic server and runs
@@ -52,20 +60,30 @@ and a Linux job that stands up a real Subsonic server and runs
 | `Sources/RadioKit/` | The framework target — all the logic, fully testable, **no UIKit** (`RadioPlayer` is `#if canImport(AVFoundation)`-guarded). |
 | `Sources/RadioKit/Models/` | `Track`, `Station`/`NowPlaying`, `Vote`/`Listener`. Value types, `Codable`, `Sendable`. |
 | `Sources/RadioKit/Engine/` | `WeightedRotationEngine` (what plays next), `VoteTally`, `AntiGaming`. Pure, no I/O. |
-| `Sources/RadioKit/Services/` | `LiveStreamService`, the `StationScheduleSource` implementations, `StationClock`, `SupabaseRadioClient`, `NavidromeClient`, `SecretStore`, `MockCatalog`. |
+| `Sources/RadioKit/Services/` | `LiveStreamService`, `FolderCatalog`, `ListenerStore`/`ListeningMeter`, `MockCatalog` — plus the dormant RadioPlus-line services (see note below): `StationSchedule`/`StationClock`, `SupabaseRadioClient`, `NavidromeClient`, `SecretStore`. |
 | `Sources/RadioKit/Player/` | `RadioPlayer` — `AVPlayer` + `MPNowPlayingInfoCenter` + remote commands. |
-| `Sources/RadioPlusApp/` | The app target: `AppDelegate` scene routing, `AppServices` (the composition root), `LiveView`/`SettingsView`/`OpenSourceView`, `CarPlaySceneDelegate`, `Info.plist`, entitlements. |
+| `Sources/SwellApp/` | The app target: `AppDelegate` scene routing, `AppServices` (the composition root), `RootView` (THE PLATE cymatics UI), `HumanLayer`, `RadioBackend` (Supabase realtime: presence, votes, shared clock), `Shaders.metal`, `CarPlaySceneDelegate`, `Info.plist`, entitlements. |
 | `Tests/RadioKitTests/` | Unit tests. They pin the design invariants — treat a failure as a product regression, not a flaky test. |
 | `tools/local-dev/` | Local Subsonic server + the Swift-client contract verifier. |
 
 ## The central seam: who decides what plays
 
-`LiveStreamService` **renders** the station; it never decides rotation. What is
-on air comes from a `StationScheduleSource` (`Services/StationSchedule.swift`),
-which hands back a `ScheduleSlot` — track id, start instant, duration, all in
-*station time*. Three implementations ship:
+The principle both lines share: **the client renders the station; the server
+decides rotation.** The OneSync Supabase backend runs
+`radio_advance_stations()` (vote-weighted pick, gapless schedule) on pg_cron
+and publishes `radio_now_playing`; everyone hears the same second. Local
+rotation (`WeightedRotationEngine`) is the offline fallback only.
 
-- **`SupabaseScheduleSource`** — the shipped default. The OneSync backend runs
+**In the active Swell app**, that seam is `RadioBackend`
+(`Sources/SwellApp/RadioBackend.swift`, using `supabase-swift` realtime for
+presence, votes, and now-playing) feeding `LiveStreamService.applyRemoteClock`.
+
+**The dormant RadioPlus line** (kept in `RadioKit`, compiled but not wired
+into the app) models the same seam as a `StationScheduleSource` protocol
+(`Services/StationSchedule.swift`) handing back `ScheduleSlot`s in *station
+time*. Its three implementations:
+
+- **`SupabaseScheduleSource`** — that line's default. The OneSync backend runs
   `radio_advance_stations()` server-side and publishes `radio_now_playing`; the
   client polls (roughly one request per song, sleeping until just past the
   slot's end), disciplines its clock off each response's `Date` header, and uses
@@ -84,9 +102,8 @@ that's what `AVPlayer` seeks and Now Playing elapsed times are quoted against.
 An unsynced clock is the identity map, deliberately — nothing special-cases
 "not synced yet".
 
-Launch arguments: `-RadioBackend local` (force on-device rotation),
-`-RadioStationID <uuid>`, `-StationFeedURL wss://…`. Precedence is spelled out
-in `AppServices.configuredScheduleSource()`.
+(The RadioPlus line's `-RadioBackend`/`-StationFeedURL` launch arguments died
+with its app target; the Swell app's launch argument is `-SwellAutoPlay YES`.)
 
 ## Invariants you must not break
 
@@ -125,7 +142,7 @@ These are product/legal constraints, not preferences. Each is covered by a test
   the schedule sources are `ObservableObject`.
 - **Public API surface.** `RadioKit` is a framework target — anything the app or
   tests touch needs `public`. Tests use `@testable import RadioKit`, so
-  internal-only helpers are fine when nothing in `Sources/RadioPlusApp` needs
+  internal-only helpers are fine when nothing in `Sources/SwellApp` needs
   them.
 - **Comments explain *why*, at length.** This codebase carries unusually rich
   doc comments that tie code to the research and legal constraints. Match that:
@@ -153,8 +170,8 @@ These are product/legal constraints, not preferences. Each is covered by a test
 
 ## Testing
 
-- `XCTest`, four files, all against `RadioKit`. No network, no real keychain, no
-  simulator UI tests.
+- `XCTest`, all against `RadioKit`. No network, no real keychain, no
+  simulator UI tests. Run with `swift test` (66 tests as of this merge).
 - HTTP is stubbed with `StubURLProtocol` (in `SupabaseRadioTests.swift`) plumbed
   through an ephemeral `URLSession`; set `StubURLProtocol.handler` per test and
   clear it in `tearDown`.

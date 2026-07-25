@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      CarPlay (com.apple.developer.carplay-audio) is intentionally absent for
+      now: it is an Apple-managed entitlement that cannot be provisioned via
+      ASC API keys (archive fails with a misleading "Authentication failed"),
+      and it has not been granted yet. Request it at
+      https://developer.apple.com/contact/carplay/ and re-add:
+
+        <key>com.apple.developer.carplay-audio</key>
+        <true/>
+
+      Until then, CarPlay is developable in the simulator only
+      (I/O ▸ External Displays ▸ CarPlay), which does not require the
+      entitlement.
+    -->
+</dict>
+</plist>

@@ -1,25 +1,47 @@
-# XcodeGen spec — generates RadioPlus.xcodeproj deterministically.
+# XcodeGen spec — generates Swell.xcodeproj deterministically.
 #
 #   brew install xcodegen   # once
 #   xcodegen generate       # produces the .xcodeproj
-#   open RadioPlus.xcodeproj
+#   open Swell.xcodeproj
 #
 # Regenerating from this file means the project is reviewable as plain text and
 # never carries a hand-merged pbxproj conflict.
 
-name: RadioPlus
+name: Swell
 options:
-  bundleIdPrefix: com.radioplus
+  bundleIdPrefix: fm.swell
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
 
+packages:
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: "2.20.0"
+
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.0"
+    # Matches the App Store Connect "RADIOSPLUS" record (Apple ID 6794523437),
+    # version 1.0 in Prepare for Submission.
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: "" # set your team, or configure signing in Xcode
+    DEVELOPMENT_TEAM: "4XMMKU4W89" # Onesync Media LLC
+
+# The scheme the README's build/test commands use: builds the app, tests the
+# RadioKit unit suite.
+schemes:
+  Swell:
+    build:
+      targets:
+        Swell: all
+        RadioKitTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - RadioKitTests
 
 targets:
   RadioKit:
@@ -29,25 +51,40 @@ targets:
       - Sources/RadioKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.radioplus.kit
+        PRODUCT_BUNDLE_IDENTIFIER: com.onesync.swellradio.kit
+        GENERATE_INFOPLIST_FILE: YES
 
-  RadioPlus:
+  Swell:
     type: application
     platform: iOS
     sources:
-      - Sources/RadioPlusApp
+      - Sources/SwellApp
+      # Folder reference: drop licensed masters in RealAudio/ and the app
+      # plays them (contents are gitignored; see RealAudio/README.md).
+      - path: RealAudio
+        type: folder
+        buildPhase: resources
+      # OFL display faces (licenses alongside in OFL-*.txt).
+      - path: Resources/Fonts
+        buildPhase: resources
     dependencies:
       - target: RadioKit
-    # Shared scheme so CI's xcodebuild can find it on a fresh checkout.
-    scheme:
-      testTargets:
-        - RadioKitTests
+      - package: Supabase
+        product: Supabase
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.radioplus.app
-        INFOPLIST_FILE: Sources/RadioPlusApp/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Sources/RadioPlusApp/RadioPlus.entitlements
+        # ASC record "SWELL RADIO" (Apple ID 6794523437). The record's Bundle ID
+        # must be set to com.onesync.swellradio in App Information for builds
+        # to attach. (RADIOPLUSAPP and com.onesync.radioplus remain registered
+        # but retired.)
+        PRODUCT_BUNDLE_IDENTIFIER: com.onesync.swellradio
+        # iPhone-only: the plate is a portrait phone instrument, and ASC
+        # rejects portrait-only bundles that also target iPad (error 90474).
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_FILE: Sources/SwellApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/SwellApp/Swell.entitlements
         GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   RadioKitTests:
     type: bundle.unit-test
@@ -56,3 +93,7 @@ targets:
       - Tests/RadioKitTests
     dependencies:
       - target: RadioKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: fm.swell.kit.tests
+        GENERATE_INFOPLIST_FILE: YES

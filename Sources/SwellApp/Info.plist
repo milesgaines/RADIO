@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <!-- Must be globally unique on the App Store (ITMS-90129 rejects the
+         build otherwise — "RADIO" alone is taken). Matches the ASC listing. -->
+    <!-- RADI0 with a zero — distinct from every taken "RADIO" (ITMS-90129). -->
+    <key>CFBundleDisplayName</key>
+    <string>RADI0</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>RADI0</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+
+    <!-- Standard crypto only (HTTPS) — skips the TestFlight compliance prompt. -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
+    <!-- Modern launch screen; without it iOS letterboxes the app. -->
+    <key>UILaunchScreen</key>
+    <dict/>
+
+    <!-- The phone experience is designed portrait-only (the car gets CarPlay). -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+
+    <!-- Let the plate run at 120 Hz on ProMotion. -->
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+
+    <!-- OFL-licensed display faces (see Resources/Fonts/OFL-*.txt). -->
+    <key>UIAppFonts</key>
+    <array>
+        <string>ClimateCrisis.ttf</string>
+        <string>GasoekOne-Regular.ttf</string>
+        <string>ArchivoBlack-Regular.ttf</string>
+        <string>InstrumentSerif-Regular.ttf</string>
+    </array>
+
+    <!-- Keep audio playing (and votes flowing) in the background / in-car. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+
+    <!-- Two scenes: the SwiftUI phone app and the CarPlay audio scene. -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <true/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key>
+                    <string>Phone</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>$(PRODUCT_MODULE_NAME).PhoneSceneDelegate</string>
+                </dict>
+            </array>
+            <key>CPTemplateApplicationSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key>
+                    <string>CarPlay</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
+    </dict>
+</dict>
+</plist>

@@ -30,16 +30,16 @@ jobs:
       - name: Build app
         run: |
           xcodebuild build \
-            -project RadioPlus.xcodeproj \
-            -scheme RadioPlus \
+            -project Swell.xcodeproj \
+            -scheme Swell \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Run RadioKit tests
         run: |
           xcodebuild test \
-            -project RadioPlus.xcodeproj \
-            -scheme RadioPlus \
+            -project Swell.xcodeproj \
+            -scheme Swell \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
             CODE_SIGNING_ALLOWED=NO
 

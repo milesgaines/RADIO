@@ -256,52 +256,9 @@ final class SupabaseRadioTests: XCTestCase {
         }
     }
 
-    // MARK: - Vote forwarding through LiveStreamService
-
-    @MainActor
-    func testLiveStreamForwardsVotesToServerBackedSource() {
-        let song = Track(title: "on air", artistID: UUID(), artistName: "A", durationSeconds: 200)
-        let spy = VoteSpySource(track: song)
-        let service = LiveStreamService(catalog: [song], scheduleSource: spy, now: { Date(timeIntervalSince1970: 1_785_004_000) })
-        service.start()
-        defer { service.stop() }
-
-        service.vote(.boost, on: song.id)
-        XCTAssertEqual(spy.votes.count, 1)
-        XCTAssertEqual(spy.votes.first?.direction, .boost)
-        XCTAssertEqual(spy.votes.first?.trackID, song.id)
-    }
 }
 
 // MARK: - Test doubles
-
-/// A schedule source that records forwarded votes and serves one fixed slot.
-@MainActor
-private final class VoteSpySource: StationScheduleSource {
-    var onScheduleChange: (@MainActor () -> Void)?
-    var netVoteWeight: (@MainActor (UUID) -> Double)?
-    var clock = StationClock()
-    var liveListenerCount: Int?
-    var recentPlays: [WeightedRotationEngine.PlayRecord] = []
-
-    private let fixed: ScheduleSlot
-    private let track: Track
-    private(set) var votes: [(direction: VoteDirection, trackID: UUID)] = []
-
-    init(track: Track) {
-        self.track = track
-        self.fixed = ScheduleSlot(trackID: track.id, startedAt: Date(timeIntervalSince1970: 1_785_004_000), durationSeconds: track.durationSeconds)
-    }
-
-    func slot(at stationNow: Date) -> ScheduleSlot? { fixed }
-    func track(withID id: UUID) -> Track? { id == track.id ? track : nil }
-    func updateCatalog(_ tracks: [Track]) {}
-    func castVote(_ direction: VoteDirection, on trackID: UUID) {
-        votes.append((direction, trackID))
-    }
-    func start() {}
-    func stop() {}
-}
 
 /// Minimal `URLProtocol` stub: answers every request from a per-test handler,
 /// so the client's parsing and headers are tested with no network.

@@ -7,7 +7,7 @@ is covered by unit tests.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                            RadioPlusApp                          │
+│                            SwellApp                          │
 │                                                                │
 │   AppDelegate ── configurationForConnecting(scene) ──┐         │
 │                                                      │         │
@@ -24,18 +24,9 @@ is covered by unit tests.
                  ┌───────────────────▼─────────────────────┐
                  │                RadioKit                   │
                  │                                           │
-                 │  LiveStreamService  ◄── renders whatever   │
-                 │    │  is on air (one shared stream)        │
-                 │    ├── StationScheduleSource ── what plays │
-                 │    │    ├── SupabaseScheduleSource (the    │
-                 │    │    │     live OneSync station: poll + │
-                 │    │    │     realtime nudge + REST votes) │
-                 │    │    ├── LocalScheduleSource  (engine   │
-                 │    │    │     on-device: offline/demo)     │
-                 │    │    └── RemoteScheduleSource (generic  │
-                 │    │          self-host websocket feed)    │
-                 │    │         └── StationClock (skew)       │
-                 │    ├── WeightedRotationEngine  (what       │
+                 │  LiveStreamService  ◄── the always-on     │
+                 │    │  station runtime (one shared stream) │
+                 │    ├── WeightedRotationEngine  (what      │
                  │    │     plays next; never nil; complement)│
                  │    ├── VoteTally ── AntiGaming  (trust +   │
                  │    │     per-listener decay)               │
@@ -46,74 +37,6 @@ is covered by unit tests.
                  │  Catalog: MockCatalog (→ swap for OneSync) │
                  └───────────────────────────────────────────┘
 ```
-
-## The shared clock
-
-"Everyone hears the same second" is a claim about a timeline, so the timeline
-is the thing that got factored out. `LiveStreamService` no longer decides what
-plays — it renders whatever `StationScheduleSource` says is on air:
-
-- **`ScheduleSlot`** — a track id, the instant it started, and its duration,
-  all in *station time*. Enough to join a stream in progress; deliberately not
-  enough to tell anyone what's coming next.
-- **`LocalScheduleSource`** — runs `WeightedRotationEngine` on-device. A real
-  station (contiguous slots, catch-up after the screen was off), but this
-  listener's own copy of it. The offline and demo path.
-- **`RemoteScheduleSource`** — a websocket client for the server timeline. The
-  server runs the same engine, tallies every listener's votes, and pushes
-  "current track + start time"; this class holds the latest push and nothing
-  else.
-- **`StationClock`** — the conversion between the two clocks. Phones drift and
-  users set the time by hand, so the server stamps each message and the client
-  estimates the offset from the round trip (`offset = stationTime - receivedAt
-  + roundTrip / 2`), keeping the lowest-latency sample in a sliding window
-  because a slow reply is exactly the one whose symmetry assumption is worst.
-  Schedules arrive in station time; `NowPlaying.startedAt` is published in
-  device time, which is what `AVPlayer` seeks against.
-
-The wire format is documented on `RemoteScheduleSource` — JSON text frames,
-timestamps as epoch seconds, `trackId` resolved against the catalog the client
-already fetched. Set a feed URL to switch a build over:
-
-```
--StationFeedURL wss://live.example.com/station
-```
-
-## The live station (Supabase)
-
-The production timeline is the OneSync backend, and it runs today. Server
-side, `radio_advance_stations()` executes the rotation for every station and
-maintains one row per station in `radio_now_playing` (`track_id`,
-`started_at`, `duration_seconds` — a `ScheduleSlot`, verbatim). The client
-side is two small types:
-
-- **`SupabaseRadioClient`** — the REST contract: read `radio_now_playing`
-  (each response's `Date` header doubles as a `StationClock` sample, so every
-  poll re-disciplines the clock), read the catalog via
-  `radio_station_tracks` → `radio_tracks`, and POST votes to `radio_votes`
-  (anonymous inserts allowed under RLS with a `listener_key`; a per-install
-  UUID). The anon key ships in the client by design — public reads and vote
-  inserts are all it can do.
-- **`SupabaseScheduleSource`** — polling is the source of truth (one request
-  per song: it sleeps until just past the current slot's end), and a
-  deliberately *stateless* `SupabaseRealtime` subscription is the accelerant:
-  any `postgres_changes` frame just means "re-read now". A payload-shape
-  change can silence the accelerant but can never corrupt what plays.
-
-Because votes are tallied server-side, the app shows no local "up next"
-teaser on the shared station (`supportsLocalPreview == false`) — the client
-genuinely doesn't know what's next, which is exactly the non-interactive
-property the licensing design wants.
-
-Listener counts ride the same poll. Each poll upserts a heartbeat into
-`radio_listeners` (`(station_id, listener_key)` primary key; `last_seen` is
-stamped server-side by trigger, so a wrong device clock can't fake
-freshness) and reads back the count of heartbeats in the trailing 75-second
-window — via `Prefer: count=exact` + `Range: 0-0`, so the answer is a
-`Content-Range` header and the payload stays one row at any audience size.
-The window is a couple of poll intervals wide, so a live listener never
-flickers out between beats, and the cutoff is quoted in *station* time
-because that's the clock that stamped the rows.
 
 ## Where each research finding lives in code
 
@@ -126,12 +49,13 @@ because that's the clock that stamped the rows.
 | Performance-complement balance | `WeightedRotationEngine.isEligible` | ≤4 tracks/artist per 3h window, ≤3 consecutive, repeat gap. |
 | Direct-license safety | `Track.interactiveLicenseGranted` | Engine refuses to schedule any master not opted in for interactive use. |
 | CarPlay = consumption + one interaction | `CarPlaySceneDelegate`, `RadioPlayer` | Templates only; `likeCommand` → boost; `nextTrackCommand` disabled (no hand-picking). |
-| OneSync catalog swap | `MockCatalog` | The only place the demo data lives; replace with the real opt-in feed. |
-| Real streaming backend | `NavidromeClient` (`Navidrome.swift`) | Subsonic-API client for a self-hosted Navidrome server: salted-token auth, catalog fetch → `Track`s with stream + artwork URLs. Configured in the app's Settings tab; `AppServices.reloadCatalog()` swaps it into the live rotation. |
-| Credentials off plain storage | `SecretStore` (`SecretStore.swift`), `NavidromeConfig` | The Navidrome password lives in the keychain (`KeychainSecretStore`), never `UserDefaults`; server URL + username stay plain preferences. `migrateLegacyPassword()` moves a pre-0.1.0 plain-text password across on launch. `InMemorySecretStore` lets the tests cover it unsigned. |
-| Joined-in-progress playback | `RadioPlayer.load` | Seeks each new asset to the stream's elapsed offset so every listener hears the same second. |
-| One shared timeline | `StationScheduleSource`, `ScheduleSlot` | Splits "what plays" from "render what's playing"; `LiveStreamService` keeps no rotation state, so the server swap is a different object behind one protocol. |
-| Same second on every device | `StationClock` | Round-trip offset estimate against the server's clock, so a phone whose own clock is a minute off still joins the track at the right second. |
+| OneSync catalog swap | `MockCatalog` | The only place the data source lives; replace with the real opt-in feed. |
+| Stations feel alive from second one | `CrowdSimulator` | Synthetic listeners tune in/out on a daypart wave and vote through the same `join`/`leave`/`castVote` API the production websocket will use. Deleted at production swap. |
+| Trust is earned, and it persists | `ListenerStore`, `ListeningMeter` | One identity per device across launches; listening tenure accrues while playback runs and is banked to disk, so `AntiGaming` trust grows with real use. |
+| More than one room to walk into | `MockCatalog.stations`, `AppServices.tune(to:)` | Always-on stations over subset catalogs; tuning re-points the shared player, both phone and CarPlay follow. |
+| Real masters play today | `FolderCatalog`, `RealAudio/` | A local folder of licensed audio becomes the station catalog (tags → filename `Artist - Title` → de-slug fallback; album subfolders become album stations). Contents never enter git. |
+| Radio joins live, resumes live | `RadioPlayer.seekToLiveEdge` | Tune in mid-track, start mid-track; resume after pause rejoins the live second — never "where you left off". |
+| Small catalogs don't starve | `Config.adaptive(to:)`, LRP fallback | Repeat-gap/window scale to catalog length; single-artist catalogs relax the complement so votes keep mattering; the dead-air fallback plays least-recently-played, never a one-track loop. |
 
 ## Design invariants (enforced by tests)
 
@@ -141,19 +65,29 @@ because that's the clock that stamped the rows.
 - **Fresh/unverified accounts barely count** (`testFreshAccountVoteIsHeavilyDiscounted`).
 - **Unlicensed masters are never scheduled** (`testUnlicensedTrackIsNeverScheduled`).
 - **No third consecutive track by one artist** (`testConsecutiveArtistCapEnforced`).
-- **The timeline has no gaps or overlaps** — each slot starts exactly where the last ended (`testTimelineIsContiguous`), and a listener who was away rejoins where the station *is* rather than replaying the backlog (`testTuningBackInLandsOnTheCurrentSlotNotTheBacklog`).
-- **A skewed device clock doesn't move the playhead** (`testSkewedDeviceClockDoesNotShiftThePlayhead`), and a listener tuning in mid-track lands on the right second (`testJoinsATrackAlreadyInProgress`).
-- **A slow round trip never displaces a better clock sample** (`testSlowRoundTripDoesNotDisplaceABetterSample`) but a stale one always gets replaced (`testStaleSampleIsReplacedEvenByASlowerOne`).
-- **The server password never comes from `UserDefaults`** (`testConfigIsNilWhenTheSecretStoreHasNoPassword`, `testSavingAPasswordNeverTouchesUserDefaults`) and a legacy plain-text copy is migrated exactly once (`testLegacyPlainTextPasswordIsMovedIntoTheSecretStore`, `testMigrationIsIdempotent`).
+- **Votes from listeners who never tuned in are dropped** (`testVoteFromUnknownListenerIsDropped`).
+- **The simulated crowd is deterministic under a seed** (`testSimulationReplaysIdenticallyUnderSameSeed`) — demos replay, tests don't flake.
+- **Station catalogs only contain opted-in artists** (`testStationCatalogsOnlyContainOptedInArtists`).
+- **Identity survives relaunch and tenure never double-counts** (`testLoadOrCreateReturnsTheSameIdentityNextLaunch`, `testListeningMeterFlushBanksMidSessionAndPersists`).
 
 ## Swapping the mock for production
 
+> **Status: the swap happened.** As of 2026-07-25 the production
+> architecture below is live: the station director runs in Supabase
+> (`radio_advance_stations()` on a 7-second pg_cron heartbeat, writing
+> `radio_now_playing`), clients render the server clock and seek to the
+> live edge, presence and votes stream over Realtime, and the local
+> engine remains only as the offline fallback so the station never dies.
+
 1. Replace `MockCatalog` with a client that returns only masters carrying an
    interactive direct license from OneSync (`interactiveLicenseGranted == true`).
-2. Stand up the schedule feed and hand the app its URL. The client half is
-   done — `RemoteScheduleSource` speaks the format documented on the type, and
-   `LiveStreamService` already renders a timeline it doesn't own. The server
-   runs the same `WeightedRotationEngine` over every listener's votes and
-   pushes "current track + start time" stamped with its own clock.
+2. Replace `LiveStreamService`'s timer-driven `advance()` with a websocket
+   client that renders the server's authoritative "current track + start time"
+   — the same server runs `WeightedRotationEngine` so every listener is in sync.
 3. Point `Track.assetURL` at real HLS stream URLs; `RadioPlayer` already drives
    `AVPlayer` + the Now Playing surfaces.
+4. Delete `CrowdSimulator`. Real presence and votes arrive over the websocket
+   and land on the same `LiveStreamService.join`/`leave`/`castVote` calls the
+   simulator uses today — nothing downstream changes.
+5. Anchor the persisted `Listener` identity to a server account;
+   `UserDefaultsListenerStore` becomes a cache of the same shape.

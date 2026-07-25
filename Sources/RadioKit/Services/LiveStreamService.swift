@@ -1,22 +1,14 @@
 import Foundation
 import Combine
 
-/// Drives one always-on station: renders whatever is on air, accepts votes,
-/// and publishes the current `NowPlaying` to every observer — the phone UI
-/// *and* the CarPlay scene watch the same object, so the car always mirrors
-/// the live stream.
+/// Drives one always-on station: advances tracks with the
+/// `WeightedRotationEngine`, accepts votes, and publishes the current
+/// `NowPlaying` state to every observer — the phone UI *and* the CarPlay scene
+/// watch the same object, so the car always mirrors the live stream.
 ///
-/// What plays is decided by a `StationScheduleSource`, not here. With the
-/// default `LocalScheduleSource` the rotation engine runs on-device, which is
-/// the offline/demo station. Point it at a `RemoteScheduleSource` and the same
-/// service renders a server timeline every listener shares — the shared-clock
-/// swap, and the reason this class holds no rotation state of its own.
-///
-/// The schedule is expressed in station time; `NowPlaying.startedAt` is in
-/// device time, because that's what `AVPlayer` seeks and Now Playing elapsed
-/// times are quoted against. `StationClock` is the conversion, so a listener
-/// whose phone clock is a minute fast still joins the track at the right
-/// second instead of a minute into it.
+/// This mock advances tracks on a timer to simulate a real server-driven
+/// stream. In production the "current track + start time" comes from the
+/// backend over a websocket; this class becomes a thin client that renders it.
 @MainActor
 public final class LiveStreamService: ObservableObject {
 
@@ -24,19 +16,17 @@ public final class LiveStreamService: ObservableObject {
 
     @Published public private(set) var nowPlaying: NowPlaying?
     @Published public private(set) var upNextPreview: [Track] = []
-    /// True when the timeline comes from a server rather than this device.
-    @Published public private(set) var isSynchronized = false
 
     private var catalog: [Track]
     private let engine: WeightedRotationEngine
     private let tally: VoteTally
-    private let source: any StationScheduleSource
 
     /// The listener using this device.
     public let currentListener: Listener
 
     private var votes: [Vote] = []
     private var listeners: [UUID: Listener] = [:]
+    private var history: [WeightedRotationEngine.PlayRecord] = []
     private var advanceTask: Task<Void, Never>?
 
     /// Injectable clock + RNG keep this testable and deterministic.
@@ -49,7 +39,6 @@ public final class LiveStreamService: ObservableObject {
         engine: WeightedRotationEngine = WeightedRotationEngine(),
         tally: VoteTally = VoteTally(),
         currentListener: Listener? = nil,
-        scheduleSource: (any StationScheduleSource)? = nil,
         now: @escaping () -> Date = { Date() },
         random: @escaping () -> Double = { Double.random(in: 0..<1) }
     ) {
@@ -59,8 +48,6 @@ public final class LiveStreamService: ObservableObject {
         self.tally = tally
         self.now = now
         self.random = random
-        self.source = scheduleSource
-            ?? LocalScheduleSource(engine: engine, catalog: catalog, random: random)
         let me = currentListener ?? Listener(
             createdAt: now().addingTimeInterval(-60 * 60 * 24 * 30),
             isVerified: true,
@@ -68,16 +55,6 @@ public final class LiveStreamService: ObservableObject {
         )
         self.currentListener = me
         self.listeners[me.id] = me
-
-        if scheduleSource != nil {
-            self.source.updateCatalog(catalog)
-        }
-        self.source.netVoteWeight = { [weak self] trackID in
-            self?.netWeights()[trackID] ?? 0
-        }
-        self.source.onScheduleChange = { [weak self] in
-            self?.refresh()
-        }
     }
 
     // MARK: - Lifecycle
@@ -85,8 +62,7 @@ public final class LiveStreamService: ObservableObject {
     /// Begin (or resume) the live stream. Idempotent.
     public func start() {
         guard advanceTask == nil else { return }
-        source.start()
-        refresh()
+        if nowPlaying == nil { advance() }
         advanceTask = Task { [weak self] in
             await self?.runLoop()
         }
@@ -95,69 +71,173 @@ public final class LiveStreamService: ObservableObject {
     public func stop() {
         advanceTask?.cancel()
         advanceTask = nil
-        source.stop()
     }
 
-    /// Station time right now — the clock the schedule is quoted in.
-    public var stationTime: Date {
-        source.clock.stationTime(forDevice: now())
-    }
-
-    /// Tick until the current track ends, then pick up whatever is next.
-    ///
-    /// Ticking at least once a second rather than sleeping exactly to the end
-    /// of the track means a server push, a clock correction, or a device that
-    /// woke up late all land within a second, and a wrong duration can never
-    /// wedge the station on a track that already ended.
     private func runLoop() async {
         while !Task.isCancelled {
-            let interval = tickInterval()
-            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            // Server clock speaking → local rotation stands down.
+            if remoteClockActive {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                continue
+            }
+            guard let np = nowPlaying else {
+                advance()
+                if nowPlaying == nil {
+                    // Nothing schedulable (empty or fully unlicensed
+                    // catalog). Retry at a human cadence — a tight loop
+                    // here would monopolize the main actor and freeze
+                    // the UI with no way to deliver stop().
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                continue
+            }
+            let remaining = np.track.durationSeconds - np.elapsed(at: now())
+            let sleepFor = max(0.25, remaining)
+            try? await Task.sleep(nanoseconds: UInt64(sleepFor * 1_000_000_000))
             if Task.isCancelled { break }
-            refresh()
+            advance()
         }
     }
 
-    private func tickInterval() -> Double {
-        guard let np = nowPlaying else { return 0.25 }
-        let remaining = np.track.durationSeconds - np.elapsed(at: now())
-        return min(1.0, max(0.25, remaining))
+    // MARK: - Audience
+
+    /// A listener tunes in. In production this arrives over the websocket as
+    /// presence; the in-app `CrowdSimulator` calls it to make the demo feel
+    /// live. Idempotent per listener id.
+    public func join(_ listener: Listener) {
+        listeners[listener.id] = listener
+        refreshListenerCount()
     }
 
-    // MARK: - Catalog
+    /// A listener tunes out. The device's own listener never leaves.
+    public func leave(_ listenerID: UUID) {
+        guard listenerID != currentListener.id else { return }
+        listeners.removeValue(forKey: listenerID)
+        refreshListenerCount()
+    }
 
-    /// Swap in a new catalog (e.g. after connecting a Navidrome server).
-    /// The current track finishes; the next slot draws from the new pool.
-    public func updateCatalog(_ tracks: [Track]) {
-        guard !tracks.isEmpty else { return }
-        catalog = tracks
-        source.updateCatalog(tracks)
+    /// Everyone currently tuned in (including the device's listener).
+    public var audienceCount: Int { listeners.count }
+
+    /// Votes this device's listener has cast on this station this session —
+    /// surfaced in the profile so voting feels owned, not fire-and-forget.
+    public var myVoteCount: Int {
+        votes.filter { $0.listenerID == currentListener.id }.count
+    }
+
+    /// Replace the stored profile for the device's listener — used when
+    /// persisted listening tenure accrues, so vote trust reflects it.
+    public func refreshCurrentListener(_ updated: Listener) {
+        guard updated.id == currentListener.id else { return }
+        listeners[updated.id] = updated
+    }
+
+    // MARK: - Real backend feeds
+
+    /// When the server's shared clock is speaking, local rotation yields:
+    /// the station director decides what's on air; this device renders it.
+    /// If the clock goes quiet (offline, backend down) the local engine
+    /// resumes — the station never dies.
+    private var lastRemoteClockAt: Date?
+    private var remoteClockActive: Bool {
+        guard let last = lastRemoteClockAt else { return false }
+        let currentDuration = nowPlaying?.track.durationSeconds ?? 300
+        return now().timeIntervalSince(last) < currentDuration + 60
+    }
+
+    /// A track this device doesn't carry locally (the ALGO station's
+    /// remote catalog) — learned from the server, playable via its URL.
+    public func upsertRemoteTrack(_ track: Track) {
+        guard !catalog.contains(where: { $0.id == track.id }) else { return }
+        catalog.append(track)
+    }
+
+    /// Apply the server's now-playing row. Unknown track ids (catalog
+    /// mismatch) are ignored and local rotation continues.
+    public func applyRemoteClock(trackID: UUID, startedAt: Date) {
+        guard let track = catalog.first(where: { $0.id == trackID }) else { return }
+        lastRemoteClockAt = now()
+        guard nowPlaying?.track.id != trackID || nowPlaying?.startedAt != startedAt else { return }
+        history.append(.init(trackID: track.id, artistID: track.artistID, playedAt: startedAt))
+        nowPlaying = NowPlaying(
+            track: track,
+            startedAt: startedAt,
+            boostScore: currentBoostScore(for: track.id),
+            liveListeners: displayListenerCount
+        )
         recomputePreview()
+    }
+
+    /// True presence from the backend. Once set, it replaces the local
+    /// roster count everywhere the audience number surfaces.
+    private var externalListenerCount: Int?
+    public func setLiveListenerCount(_ count: Int) {
+        externalListenerCount = max(1, count)
+        refreshListenerCount()
+    }
+
+    var displayListenerCount: Int {
+        externalListenerCount ?? max(1, listeners.count)
+    }
+
+    /// A real vote from another device, off the realtime stream. The remote
+    /// listener gets a provisional trusted profile client-side; the
+    /// server-side tally replaces this approximation with the shared clock.
+    public func ingestRemoteVote(_ direction: VoteDirection, on trackID: UUID, fromKey key: String) {
+        let remoteID = FolderCatalog.stableID("remote-listener:\(key)")
+        if listeners[remoteID] == nil {
+            listeners[remoteID] = Listener(
+                id: remoteID,
+                createdAt: now().addingTimeInterval(-60 * 60 * 24 * 30),
+                isVerified: true,
+                lifetimeListeningSeconds: 60 * 60 * 30
+            )
+        }
+        castVote(direction, on: trackID, by: remoteID)
     }
 
     // MARK: - Voting
 
-    /// Boost or bury a track from the live audience. Returns the new net tally.
+    /// Boost or bury a track as the device's listener. Returns the new net tally.
     @discardableResult
     public func vote(_ direction: VoteDirection, on trackID: UUID) -> Int {
+        castVote(direction, on: trackID, by: currentListener.id)
+    }
+
+    /// Boost or bury a track on behalf of any tuned-in listener. This is the
+    /// same path a vote coming off the wire takes in production; the
+    /// `CrowdSimulator` uses it for synthetic listeners. Votes from unknown
+    /// listeners are dropped (the tally would discard them anyway).
+    @discardableResult
+    public func castVote(_ direction: VoteDirection, on trackID: UUID, by listenerID: UUID) -> Int {
+        guard listeners[listenerID] != nil else { return currentBoostScore(for: trackID) }
         let vote = Vote(
-            listenerID: currentListener.id,
+            listenerID: listenerID,
             trackID: trackID,
             stationID: station.id,
             direction: direction,
             castAt: now()
         )
         votes.append(vote)
-        // Forward to the server for a remote station (no-op for the local
-        // source, which tallies in-app). The optimistic bump below gives
-        // instant feedback; the server's next slot update carries the truth.
-        source.castVote(direction, on: trackID)
         recomputePreview()
         if var np = nowPlaying, np.track.id == trackID {
-            np.boostScore += direction.rawValue
+            np.boostScore = currentBoostScore(for: trackID)
             nowPlaying = np
         }
-        return Int(netWeights()[trackID] ?? 0)
+        return currentBoostScore(for: trackID)
+    }
+
+    /// The displayed score is the *effective* net tally (trust-weighted,
+    /// decayed), rounded — so what listeners see is what actually shapes
+    /// rotation, and a bot farm's spam visibly counts for almost nothing.
+    private func currentBoostScore(for trackID: UUID) -> Int {
+        Int((netWeights()[trackID] ?? 0).rounded())
+    }
+
+    private func refreshListenerCount() {
+        guard var np = nowPlaying else { return }
+        np.liveListeners = displayListenerCount
+        nowPlaying = np
     }
 
     /// Convenience for the single CarPlay / Siri "boost current track" action.
@@ -167,44 +247,24 @@ public final class LiveStreamService: ObservableObject {
         return vote(.boost, on: id)
     }
 
-    // MARK: - Rendering the schedule
+    // MARK: - Rotation
 
-    /// Pull the current slot and publish it in device time. Cheap and
-    /// idempotent — it's both the tick handler and the push handler.
-    private func refresh() {
-        let clock = source.clock
-        // Assign only on change: this runs every tick, and a no-op write to a
-        // @Published would redraw the whole stage once a second.
-        if isSynchronized != clock.isSynchronized {
-            isSynchronized = clock.isSynchronized
-        }
-
-        guard
-            let slot = source.slot(at: clock.stationTime(forDevice: now())),
-            let track = source.track(withID: slot.trackID)
-        else { return }
-
-        let startedAt = clock.deviceTime(forStation: slot.startedAt)
-        let liveListeners = source.liveListenerCount ?? max(1, listeners.count)
-
-        if var np = nowPlaying,
-           np.track.id == track.id,
-           abs(np.startedAt.timeIntervalSince(startedAt)) < 0.5 {
-            // Same slot. Refresh the live numbers, but leave `boostScore`
-            // alone: a vote cast on this device already moved it, and
-            // recomputing here would snap the tap back under the listener.
-            if np.liveListeners != liveListeners {
-                np.liveListeners = liveListeners
-                nowPlaying = np
-            }
-            return
-        }
-
+    private func advance() {
+        let n = now()
+        let next = engine.selectNext(
+            candidates: catalog,
+            netVoteWeight: { [weak self] track in self?.netWeights()[track.id] ?? 0 },
+            history: history,
+            now: n,
+            random: random
+        )
+        guard let track = next else { return }
+        history.append(.init(trackID: track.id, artistID: track.artistID, playedAt: n))
         nowPlaying = NowPlaying(
             track: track,
-            startedAt: startedAt,
-            boostScore: Int((netWeights()[track.id] ?? 0).rounded()),
-            liveListeners: liveListeners
+            startedAt: n,
+            boostScore: currentBoostScore(for: track.id),
+            liveListeners: displayListenerCount
         )
         recomputePreview()
     }
@@ -217,15 +277,8 @@ public final class LiveStreamService: ObservableObject {
     /// phone only — never presented as "the exact next song", which would push
     /// us toward an interactive service. It's a teaser, not a schedule.
     private func recomputePreview() {
-        // A shared station owns what's next and doesn't tell the client; only
-        // the local source, which ranks the full candidate catalog, previews.
-        guard source.supportsLocalPreview else {
-            if !upNextPreview.isEmpty { upNextPreview = [] }
-            return
-        }
         let n = now()
         let weights = netWeights()
-        let history = source.recentPlays
         let ranked = catalog
             .map { ($0, engine.weight(for: $0, netVoteWeight: weights[$0.id] ?? 0, history: history, now: n)) }
             .filter { $0.1 > 0 && $0.0.id != nowPlaying?.track.id }

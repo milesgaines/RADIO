@@ -20,3 +20,7 @@ xcuserdata/
 *.mobileprovision
 *.p12
 secrets.xcconfig
+
+# Licensed masters live here locally but never enter the repo
+RealAudio/*
+!RealAudio/README.md

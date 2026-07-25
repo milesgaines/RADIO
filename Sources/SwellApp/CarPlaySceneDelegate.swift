@@ -13,6 +13,7 @@ import RadioKit
 final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegate {
 
     private var interfaceController: CPInterfaceController?
+    private var stationsTemplate: CPListTemplate?
     private var cancellables: Set<AnyCancellable> = []
 
     func templateApplicationScene(
@@ -20,9 +21,11 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         didConnect interfaceController: CPInterfaceController
     ) {
         self.interfaceController = interfaceController
-        interfaceController.setRootTemplate(makeStationsTemplate(), animated: false, completion: nil)
+        let template = makeStationsTemplate()
+        self.stationsTemplate = template
+        interfaceController.setRootTemplate(template, animated: false, completion: nil)
         configureNowPlaying()
-        observeStream()
+        observeStreams()
     }
 
     func templateApplicationScene(
@@ -30,22 +33,36 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
         didDisconnectInterfaceController interfaceController: CPInterfaceController
     ) {
         self.interfaceController = nil
+        self.stationsTemplate = nil
         cancellables.removeAll()
     }
 
     // MARK: - Station list (root)
 
+    /// Every always-on station, selectable from the car. Selecting tunes the
+    /// shared player — the same stream the phone is showing.
     private func makeStationsTemplate() -> CPListTemplate {
-        let station = AppServices.shared.stream.station
-        let item = CPListItem(text: station.name, detailText: station.tagline)
-        item.handler = { [weak self] _, completion in
-            AppServices.shared.player.play()
-            self?.pushNowPlaying()
-            completion()
-        }
-        let section = CPListSection(items: [item])
-        let template = CPListTemplate(title: "RADIO+", sections: [section])
+        let template = CPListTemplate(title: "Swell", sections: [makeStationSection()])
         return template
+    }
+
+    private func makeStationSection() -> CPListSection {
+        let items = AppServices.shared.streams.map { stream -> CPListItem in
+            let station = stream.station
+            let listeners = stream.nowPlaying?.liveListeners ?? 1
+            let item = CPListItem(
+                text: station.name,
+                detailText: "\(listeners) listening live — \(station.tagline)"
+            )
+            item.handler = { [weak self] _, completion in
+                AppServices.shared.tune(to: station)
+                AppServices.shared.player.play()
+                self?.pushNowPlaying()
+                completion()
+            }
+            return item
+        }
+        return CPListSection(items: items)
     }
 
     private func pushNowPlaying() {
@@ -65,17 +82,23 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
 
         let boost = CPNowPlayingImageButton(image: Self.boostImage()) { _ in
             AppServices.shared.player.play()
-            AppServices.shared.stream.boostCurrent()
+            AppServices.shared.activeStream.boostCurrent()
             AppServices.shared.player.refreshNowPlayingInfo()
         }
         np.updateNowPlayingButtons([boost])
     }
 
-    private func observeStream() {
-        // Keep the system Now Playing metadata fresh as the stream advances.
-        AppServices.shared.stream.$nowPlaying
+    private func observeStreams() {
+        // Keep the system Now Playing metadata fresh as the *active* stream
+        // advances, and keep the station list's live counts current.
+        AppServices.shared.$activeStream
+            .map { $0.$nowPlaying }
+            .switchToLatest()
             .receive(on: RunLoop.main)
-            .sink { _ in AppServices.shared.player.refreshNowPlayingInfo() }
+            .sink { [weak self] _ in
+                AppServices.shared.player.refreshNowPlayingInfo()
+                self?.stationsTemplate?.updateSections([self?.makeStationSection()].compactMap { $0 })
+            }
             .store(in: &cancellables)
     }
 
