@@ -2,173 +2,200 @@ import SwiftUI
 import RadioKit
 
 // MARK: - RADIO
-// The station is a living thing. Every listener feeds a murmuration of ink
-// birds flying in bright daylight; the flock IS the crowd. It swirls to the
-// music, spells the track title out of its own bodies when a song lands,
-// blooms color when the crowd boosts, recoils when it buries, and migrates
-// off-screen when you tune away. No cards, no panels, no buttons — flick up
-// to boost, flick down to bury, swipe across to tune, tap to play.
+// The station is a vibrating plate. Thousands of sand grains crawl across it
+// and settle onto the nodal lines of a Chladni resonance figure — the shape
+// a real steel plate makes when you bow it at a frequency. The figure is
+// driven by the ACTUAL audio of the track (bass and treble bend the mode,
+// every kick scatters the sand and it re-crystallizes), so every song has
+// its own emergent shape and the whole screen breathes with the music.
+//
+// Flick up to boost (the plate flares the station color and the sand leaps),
+// flick down to bury (it collapses), swipe to tune (the figure morphs to the
+// next station's), tap to play. No cards, no panels, no buttons.
 
 struct RootView: View {
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var player: RadioPlayer
 
     var body: some View {
-        AviaryView(stream: services.activeStream)
-            .preferredColorScheme(.light)
+        PlateView(stream: services.activeStream)
+            .preferredColorScheme(.dark)
             .persistentSystemOverlays(.hidden)
     }
 }
 
-// MARK: - Sky + flock + whisper-thin chrome
-
-private struct AviaryView: View {
+private struct PlateView: View {
     @ObservedObject var stream: LiveStreamService
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var player: RadioPlayer
 
-    @State private var flock = FlockEngine()
+    @State private var plate = CymaticPlate()
     @State private var showHints = true
-    @State private var stationCard: String?
+    @State private var stationFlash: String?
 
-    /// Warm paper daylight — never pure white.
-    private let sky = Color(red: 0.968, green: 0.953, blue: 0.922)
-    private let ink = Color(red: 0.11, green: 0.10, blue: 0.09)
+    private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
+    private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
 
-    private var accent: Color {
-        FlockEngine.accents[stationIndex % FlockEngine.accents.count]
-    }
-    private var stationIndex: Int {
+    private var accentIndex: Int {
         services.streams.firstIndex(where: { $0 === stream }) ?? 0
     }
+    private var accent: Color { CymaticPlate.accents[accentIndex % CymaticPlate.accents.count] }
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                sky.ignoresSafeArea()
+                ink.ignoresSafeArea()
 
-                FlockCanvas(flock: flock)
+                TimelineView(.animation(minimumInterval: 1.0 / 60)) { context in
+                    Canvas { canvas, size in
+                        plate.stepAndDraw(in: canvas, size: size, date: context.date)
+                    }
                     .ignoresSafeArea()
+                    .drawingGroup()
+                }
+
+                // Bottom scrim so type reads over the densest sand — a wash,
+                // not a card.
+                LinearGradient(
+                    colors: [.clear, ink.opacity(0.7), ink],
+                    startPoint: .center, endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
                 chrome(in: geo.size)
             }
             .contentShape(Rectangle())
             .gesture(gestures(in: geo.size))
             .onAppear {
-                flock.configure(size: geo.size, listeners: stream.nowPlaying?.liveListeners ?? 8)
-                syncFlock()
+                plate.configure(size: geo.size)
+                sync()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
                     withAnimation(.easeOut(duration: 1.2)) { showHints = false }
                 }
             }
-            .onChange(of: stream.nowPlaying?.track.id) { syncFlock() }
-            .onChange(of: player.isPlaying) { flock.isPlaying = player.isPlaying }
-            .onChange(of: stream.nowPlaying?.liveListeners ?? 1) { _, count in
-                flock.setCrowd(count)
-            }
-            .onChange(of: stream.nowPlaying?.boostScore ?? 0) { old, new in
-                flock.crowdPing(positive: new >= old)
-            }
+            .onChange(of: stream.nowPlaying?.track.id) { sync() }
+            .onChange(of: player.isPlaying) { plate.isPlaying = player.isPlaying }
+            .onChange(of: player.levels) { _, new in plate.levels = new }
         }
     }
 
-    private func syncFlock() {
-        guard let np = stream.nowPlaying else { return }
-        flock.accentIndex = stationIndex
-        flock.isPlaying = player.isPlaying
-        flock.setCrowd(np.liveListeners)
-        flock.spell(np.track.title)
+    private func sync() {
+        plate.accentIndex = accentIndex
+        plate.isPlaying = player.isPlaying
+        if let title = stream.nowPlaying?.track.title { plate.setFigure(for: title) }
     }
 
-    // The only fixed matter on screen: a few lines of small type at the
-    // edges. Everything else is alive.
+    // Whisper-thin type at the edges. Everything else is sand.
     private func chrome(in size: CGSize) -> some View {
-        VStack {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("radio")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(ink)
+                Text("RADIO")
+                    .font(.custom("Gasoek One", size: 22))
+                    .foregroundStyle(bone)
                 Spacer()
                 HStack(spacing: 6) {
                     if player.isPlaying {
                         Circle().fill(accent).frame(width: 6, height: 6)
                     }
                     Text(player.isPlaying
-                         ? "live · \(stream.nowPlaying?.liveListeners ?? 1) flying with you"
-                         : "resting — tap to fly")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(ink.opacity(0.55))
+                         ? "LIVE · \(stream.nowPlaying?.liveListeners ?? 1)"
+                         : "RESTING")
+                        .font(.custom("Archivo Black", size: 12))
+                        .tracking(1)
+                        .foregroundStyle(bone.opacity(0.6))
                         .monospacedDigit()
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 8)
+            .padding(.horizontal, 22)
+            .padding(.top, 6)
 
             Spacer()
 
-            HStack(alignment: .bottom) {
-                VStack(alignment: .leading, spacing: 3) {
-                    if let np = stream.nowPlaying {
-                        Text(np.track.title)
-                            .font(.system(size: 21, weight: .semibold))
-                            .foregroundStyle(ink)
-                        Text(np.track.artistName)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(ink.opacity(0.5))
-                        if np.boostScore != 0 {
-                            Text(np.boostScore > 0
-                                 ? "the crowd lifts it +\(np.boostScore)"
-                                 : "the crowd lets it go \(np.boostScore)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(np.boostScore > 0 ? accent : ink.opacity(0.4))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                                .animation(.snappy, value: np.boostScore)
-                        }
+            if let np = stream.nowPlaying {
+                Text(np.track.title)
+                    .font(.custom("Gasoek One", size: heroSize(np.track.title)))
+                    .foregroundStyle(bone)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.5)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: ink.opacity(0.6), radius: 12)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.5), value: np.track.id)
+
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(np.track.artistName)
+                        .font(.custom("Instrument Serif", size: 24))
+                        .foregroundStyle(bone.opacity(0.7))
+                    if np.boostScore != 0 {
+                        Text(np.boostScore > 0 ? "▲ \(np.boostScore)" : "▼ \(-np.boostScore)")
+                            .font(.custom("Archivo Black", size: 13))
+                            .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.4))
+                            .monospacedDigit()
+                            .contentTransition(.numericText())
+                            .animation(.snappy, value: np.boostScore)
                     }
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(stream.station.name.lowercased())
-                        .font(.system(size: 14, weight: .semibold))
+
+                HStack(spacing: 8) {
+                    Text(stream.station.name.uppercased())
+                        .font(.custom("Archivo Black", size: 12))
+                        .tracking(1.5)
                         .foregroundStyle(accent)
-                    Text("station \(stationIndex + 1) of \(services.streams.count)")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(ink.opacity(0.35))
+                    Text("· \(accentIndex + 1)/\(services.streams.count)")
+                        .font(.custom("Archivo Black", size: 12))
+                        .foregroundStyle(bone.opacity(0.3))
+                    if let album = np.track.albumTitle {
+                        Text("· \(album.uppercased())")
+                            .font(.custom("Archivo Black", size: 11))
+                            .foregroundStyle(bone.opacity(0.3))
+                            .lineLimit(1)
+                    }
                 }
+                .padding(.top, 2)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, showHints ? 14 : 26)
 
             if showHints {
-                Text("flick up to boost · down to bury · swipe to tune · tap to play")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(ink.opacity(0.35))
-                    .padding(.bottom, 14)
+                Text("flick ↑ boost   ↓ bury   ← → tune   tap play")
+                    .font(.custom("Instrument Serif", size: 18))
+                    .foregroundStyle(bone.opacity(0.4))
+                    .padding(.top, 10)
                     .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 22)
+        .padding(.bottom, 22)
         .overlay {
-            if let name = stationCard {
-                Text(name.lowercased())
-                    .font(.system(size: 44, weight: .heavy))
-                    .foregroundStyle(ink.opacity(0.9))
-                    .transition(.opacity)
+            if let name = stationFlash {
+                Text(name.uppercased())
+                    .font(.custom("Gasoek One", size: 40))
+                    .foregroundStyle(accent)
+                    .shadow(color: ink, radius: 20)
+                    .transition(.scale(scale: 1.1).combined(with: .opacity))
                     .id(name)
             }
         }
         .allowsHitTesting(false)
     }
 
-    // MARK: Gestures — the whole sky is the control surface
+    private func heroSize(_ title: String) -> CGFloat {
+        switch title.count {
+        case 0...8: return 68
+        case 9...14: return 52
+        case 15...22: return 40
+        default: return 32
+        }
+    }
+
+    // MARK: Gestures — the whole plate is the control surface
 
     private func gestures(in size: CGSize) -> some Gesture {
         let swipe = DragGesture(minimumDistance: 24)
             .onEnded { value in
-                let dx = value.translation.width
-                let dy = value.translation.height
+                let dx = value.translation.width, dy = value.translation.height
                 if abs(dx) > abs(dy) {
-                    tune(direction: dx < 0 ? 1 : -1, size: size)
+                    tune(dx < 0 ? 1 : -1)
                 } else if dy < -30 {
                     vote(.boost)
                 } else if dy > 30 {
@@ -177,7 +204,7 @@ private struct AviaryView: View {
             }
         let tap = TapGesture().onEnded {
             player.toggle()
-            flock.isPlaying = player.isPlaying
+            plate.isPlaying = player.isPlaying
             Haptics.tap()
         }
         return swipe.exclusively(before: tap)
@@ -187,322 +214,215 @@ private struct AviaryView: View {
         guard let id = stream.nowPlaying?.track.id else { return }
         stream.vote(direction, on: id)
         if direction == .boost {
-            flock.surge()
+            plate.strike()
             Haptics.boost()
         } else {
-            flock.recoil()
+            plate.collapse()
             Haptics.tap()
         }
     }
 
-    private func tune(direction: Int, size: CGSize) {
+    private func tune(_ direction: Int) {
         let streams = services.streams
-        let next = (stationIndex + direction + streams.count) % streams.count
-        flock.migrate(toward: direction) // birds fly out the side you swiped
+        let next = (accentIndex + direction + streams.count) % streams.count
         services.tune(to: streams[next].station)
-
         let name = streams[next].station.name
-        withAnimation(.easeIn(duration: 0.25)) { stationCard = name }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-            if stationCard == name {
-                withAnimation(.easeOut(duration: 0.8)) { stationCard = nil }
-            }
+        withAnimation(.easeIn(duration: 0.2)) { stationFlash = name }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            if stationFlash == name { withAnimation(.easeOut(duration: 0.7)) { stationFlash = nil } }
         }
         Haptics.detent()
     }
 }
 
-// MARK: - Canvas host
+// MARK: - The Chladni plate
 
-private struct FlockCanvas: View {
-    let flock: FlockEngine
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 40)) { context in
-            Canvas { canvas, size in
-                flock.stepAndDraw(in: canvas, size: size, date: context.date)
-            }
-        }
-    }
-}
-
-// MARK: - The flock
-
-/// A few hundred birds with three minds: wander the wind field, spell the
-/// title, or migrate off-screen. Everything is a pure function of the sim
-/// state, stepped inside the render loop — SwiftUI state never churns.
+/// A sand-on-vibrating-plate simulation. Grains descend the gradient of the
+/// mode-shape magnitude toward the nodal lines (where the plate is still) and
+/// get kicked by jitter proportional to the local vibration times the live
+/// audio excitation. Loud transients scatter the figure; quiet passages let
+/// it crystallize. Pure function of its own state — stepped in the render
+/// loop, so SwiftUI state never churns per frame.
 @MainActor
-final class FlockEngine {
+final class CymaticPlate {
     static let accents: [Color] = [
-        Color(red: 1.00, green: 0.35, blue: 0.21), // coral      — station 1
-        Color(red: 0.16, green: 0.32, blue: 1.00), // cobalt     — station 2
-        Color(red: 0.05, green: 0.62, blue: 0.33), // leaf green — station 3
-        Color(red: 0.72, green: 0.28, blue: 0.92), // iris       — overflow
+        Color(red: 1.00, green: 0.36, blue: 0.18), // ember   — station 1
+        Color(red: 0.30, green: 0.72, blue: 1.00), // ice     — station 2
+        Color(red: 0.36, green: 0.92, blue: 0.53), // acid    — station 3
+        Color(red: 0.86, green: 0.44, blue: 1.00), // orchid  — overflow
     ]
-
-    private struct Bird {
-        var x: Double, y: Double
-        var vx: Double, vy: Double
-        var seed: Double            // per-bird personality
-        var target: Int = -1        // index into letterDots, -1 = free
-        var ping: Double = 0        // accent flash amount (crowd votes)
-    }
 
     var accentIndex = 0
     var isPlaying = false
+    var levels: AudioLevels = .zero
 
-    private var birds: [Bird] = []
+    private struct Grain { var x: Double; var y: Double; var bright: Double }
+    private var grains: [Grain] = []
     private var size: CGSize = .zero
     private var lastStep: Date?
-    private var letterDots: [CGPoint] = []
-    private var spellUntil: Date = .distantPast
-    private var respellAt: Date = .distantFuture
-    private var surgeUntil: Date = .distantPast
-    private var recoilUntil: Date = .distantPast
-    private var migrationX: Double = 0 // -1 left, +1 right, decays
-    private var desiredCount = 220
 
-    // MARK: Public verbs
+    // Mode shape s(x,y) = cos(nπx)cos(mπy) − cos(mπx)cos(nπy). n,m ease
+    // toward per-track targets, bent live by the audio bands.
+    private var n = 4.0, m = 3.0
+    private var targetN = 4.0, targetM = 3.0
+    private var baseN = 4.0, baseM = 3.0
 
-    func configure(size: CGSize, listeners: Int) {
+    private var strikeUntil: Date = .distantPast
+    private var collapseUntil: Date = .distantPast
+
+    private let grainCount = 3400
+
+    func configure(size: CGSize) {
         self.size = size
-        setCrowd(listeners)
-        if birds.isEmpty {
-            for _ in 0..<desiredCount { birds.append(hatch(edge: false)) }
+        guard grains.isEmpty else { return }
+        grains = (0..<grainCount).map { _ in
+            Grain(x: Double.random(in: 0...1), y: Double.random(in: 0...1), bright: 0)
         }
     }
 
-    /// The flock's population tracks the live audience.
-    func setCrowd(_ listeners: Int) {
-        desiredCount = min(560, 150 + listeners * 9)
+    /// Each track gets a signature figure from a hash of its title.
+    func setFigure(for title: String) {
+        var h = UInt64(0xcbf29ce484222325)
+        for b in title.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        baseN = 3 + Double(h % 6)            // 3…8
+        baseM = 2 + Double((h >> 8) % 6)     // 2…7
+        if abs(baseN - baseM) < 1 { baseM += 2 } // avoid degenerate figures
     }
 
-    /// Form the title out of birds for a few seconds, then let it dissolve.
-    func spell(_ title: String) {
-        let text = fittedText(from: title)
-        letterDots = Self.layout(text: text, in: size)
-        assignTargets()
-        spellUntil = Date().addingTimeInterval(6.0)
-        respellAt = Date().addingTimeInterval(26.0)
-    }
-
-    /// Boost: the whole organism lifts and blooms.
-    func surge() {
-        surgeUntil = Date().addingTimeInterval(1.4)
-        for i in birds.indices where Double.random(in: 0...1) < 0.5 {
-            birds[i].ping = 1.0
-        }
-    }
-
-    /// Bury: it flinches and dims.
-    func recoil() {
-        recoilUntil = Date().addingTimeInterval(1.0)
-    }
-
-    /// A crowd vote lands somewhere out there — a few birds flash.
-    func crowdPing(positive: Bool) {
-        let count = positive ? 5 : 2
-        for _ in 0..<count {
-            if let i = birds.indices.randomElement() {
-                birds[i].ping = positive ? 1.0 : 0.4
-            }
-        }
-    }
-
-    /// Tuning: current birds stream off one side; newcomers blow in.
-    func migrate(toward direction: Int) {
-        migrationX = Double(direction) * -1 // swipe left = birds exit left
-        spellUntil = .distantPast
-        for i in birds.indices {
-            birds[i].vx += migrationX * Double.random(in: 260...420)
-            birds[i].vy += Double.random(in: -60...60)
-            birds[i].target = -1
-        }
-    }
-
-    // MARK: Simulation + draw (one pass, no retained SwiftUI state)
+    func strike() { strikeUntil = Date().addingTimeInterval(0.9) }
+    func collapse() { collapseUntil = Date().addingTimeInterval(0.8) }
 
     func stepAndDraw(in canvas: GraphicsContext, size: CGSize, date: Date) {
         if self.size != size { self.size = size }
-        let dt = min(lastStep.map { date.timeIntervalSince($0) } ?? 1 / 40, 1 / 20)
+        let dt = min(lastStep.map { date.timeIntervalSince($0) } ?? 1.0 / 60, 1.0 / 24)
         lastStep = date
-        let t = date.timeIntervalSinceReferenceDate
 
-        if date > respellAt, !letterDots.isEmpty {
-            assignTargets()
-            spellUntil = date.addingTimeInterval(5.0)
-            respellAt = date.addingTimeInterval(26.0)
-        }
+        let bass = Double(levels.bass), treble = Double(levels.treble), rms = Double(levels.rms)
+        let striking = date < strikeUntil
+        let collapsing = date < collapseUntil
 
-        stepPopulation()
-        let spelling = date < spellUntil
-        let surging = date < surgeUntil
-        let recoiling = date < recoilUntil
-        migrationX *= pow(0.2, dt)
+        // Audio bends the mode: bass raises n, treble raises m. The figure
+        // literally re-tunes to the music.
+        targetN = baseN + bass * 3
+        targetM = baseM + treble * 3
+        let ease = 1 - pow(0.05, dt)
+        n += (targetN - n) * ease
+        m += (targetM - m) * ease
 
-        let cx = size.width / 2
-        let cy = size.height * 0.44
-        let tempo = isPlaying ? 1.0 : 0.35
-        let breathe = isPlaying ? (0.5 + 0.5 * sin(t * 0.9)) : 0.15
+        // Excitation: silence freezes the figure; loudness makes it dance.
+        var excite = isPlaying ? 0.10 + rms * 1.7 : 0.0
+        if striking { excite += 1.4 }
+        let converge = collapsing ? 0.0 : 0.0038 * (dt * 60)  // gradient pull
+        let jitter = excite * 0.05 * (dt * 60)
+        let crawl = 0.0022 * (dt * 60) * (isPlaying ? 1 : 0.1)
 
-        for i in birds.indices {
-            var b = birds[i]
+        let piN = n * .pi, piM = m * .pi
+        for i in grains.indices {
+            var g = grains[i]
 
-            if spelling, b.target >= 0, b.target < letterDots.count {
-                // Spring to the assigned letter dot.
-                let dot = letterDots[b.target]
-                b.vx += (dot.x - b.x) * 7.0 * dt * 60 / 12
-                b.vy += (dot.y - b.y) * 7.0 * dt * 60 / 12
-                b.vx *= pow(0.0018, dt) // heavy damping settles the glyphs
-                b.vy *= pow(0.0018, dt)
-            } else {
-                // Wind field: three layered rotating currents — organic,
-                // correlated motion without O(n²) neighbor math.
-                let windX = sin(b.y * 0.011 + t * 0.7 * tempo + b.seed)
-                    + 0.6 * sin(b.y * 0.023 - t * 0.41 * tempo + b.seed * 2)
-                let windY = cos(b.x * 0.009 - t * 0.53 * tempo + b.seed)
-                    + 0.6 * sin(b.x * 0.017 + t * 0.67 * tempo + b.seed * 3)
-                b.vx += windX * (34 + 26 * breathe) * dt * tempo
-                b.vy += windY * (30 + 22 * breathe) * dt * tempo
+            let cnx = cos(piN * g.x), cmx = cos(piM * g.x)
+            let cny = cos(piN * g.y), cmy = cos(piM * g.y)
+            let s = cnx * cny - cmx * cmy
 
-                // Soft gravity toward the roost keeps the flock on stage.
-                b.vx += (cx - b.x) * 0.14 * dt
-                b.vy += (cy - b.y) * 0.16 * dt
+            // Analytic gradient of s — used both to descend toward the
+            // nodal line and to crawl along it.
+            let snx = sin(piN * g.x), smx = sin(piM * g.x)
+            let sny = sin(piN * g.y), smy = sin(piM * g.y)
+            let gx = -piN * snx * cny + piM * smx * cmy
+            let gy = -piM * cnx * smy + piN * cmx * sny
+            let gmag = (gx * gx + gy * gy).squareRoot()
 
-                if surging {
-                    b.vy -= 260 * dt
-                    b.vx += sin(b.seed * 7 + t * 3) * 90 * dt
-                }
-                if recoiling {
-                    b.vx += (b.x - cx) * -0.9 * dt
-                    b.vy += (b.y - cy) * -0.9 * dt
-                }
+            if converge > 0, gmag > 1e-4 {
+                let sign = s >= 0 ? 1.0 : -1.0
+                // Overshoot guard: never step past the line in one frame.
+                let step = min(converge, abs(s) / gmag)
+                g.x -= step * sign * gx / gmag
+                g.y -= step * sign * gy / gmag
 
-                b.vx *= pow(0.28, dt)
-                b.vy *= pow(0.28, dt)
+                // Tangential crawl: sand keeps redistributing ALONG the
+                // line (perpendicular to the gradient), so figures stay
+                // fully traced instead of clumping into piles.
+                let dir = rand(i, date, 2) < 0.5 ? 1.0 : -1.0
+                g.x += dir * crawl * (-gy / gmag) * (rand(i, date, 3) * 0.8 + 0.2)
+                g.y += dir * crawl * (gx / gmag) * (rand(i, date, 3) * 0.8 + 0.2)
             }
 
-            b.x += b.vx * dt
-            b.y += b.vy * dt
-            b.ping = max(0, b.ping - dt * 1.6)
-
-            // Migrating birds that leave get rehatched on the far edge.
-            if b.x < -40 || b.x > Double(size.width) + 40 || b.y < -60 || b.y > Double(size.height) + 60 {
-                b = hatch(edge: true)
+            if collapsing {
+                // Bury: sand slides to the plate's rim and piles up.
+                g.x += (g.x - 0.5) * 1.2 * dt
+                g.y += (g.y - 0.5) * 1.2 * dt
             }
-            birds[i] = b
+
+            // Vibration jitter — strongest at antinodes, but never zero:
+            // even settled sand shivers, which is what keeps it alive.
+            let vib = jitter * (0.18 + abs(s))
+            g.x += (rand(i, date, 0) - 0.5) * vib
+            g.y += (rand(i, date, 1) - 0.5) * vib
+
+            // Reflect off the plate edges.
+            if g.x < 0 { g.x = -g.x }; if g.x > 1 { g.x = 2 - g.x }
+            if g.y < 0 { g.y = -g.y }; if g.y > 1 { g.y = 2 - g.y }
+            g.x = min(max(g.x, 0), 1); g.y = min(max(g.y, 0), 1)
+
+            // Settled grains (near a nodal line) shine; wandering ones fade.
+            let target = 1 - min(1, abs(s) * 1.6)
+            g.bright += (target - g.bright) * min(1, dt * 6)
+            grains[i] = g
         }
 
-        draw(canvas: canvas, spelling: spelling, t: t)
+        draw(canvas: canvas, size: size, bass: bass, striking: striking)
     }
 
-    private func draw(canvas: GraphicsContext, spelling: Bool, t: Double) {
-        let ink = Color(red: 0.11, green: 0.10, blue: 0.09)
+    private func draw(canvas: GraphicsContext, size: CGSize, bass: Double, striking: Bool) {
+        let bone = Color(red: 0.965, green: 0.945, blue: 0.9)
         let accent = Self.accents[accentIndex % Self.accents.count]
+        // On bass hits and boosts, the settled figure glows the station color.
+        let accentMix = min(1, bass * 0.7 + (striking ? 0.6 : 0))
 
-        for (i, b) in birds.enumerated() {
-            // A bird is a short stroke along its heading — a brushmark, not
-            // a circle. Size varies by personality; a handful wear the
-            // station's color even at rest.
-            let speed = max(18, min(240, (b.vx * b.vx + b.vy * b.vy).squareRoot()))
-            let nx = b.vx / speed, ny = b.vy / speed
-            let len = 2.6 + b.seed.truncatingRemainder(dividingBy: 1) * 3.4 + speed * 0.012
-            let wingbeat = spelling ? 1.0 : (0.75 + 0.25 * sin(t * 9 + b.seed * 20))
-
-            var path = Path()
-            path.move(to: CGPoint(x: b.x - nx * len * wingbeat, y: b.y - ny * len * wingbeat))
-            path.addLine(to: CGPoint(x: b.x + nx * len * wingbeat, y: b.y + ny * len * wingbeat))
-
-            let isAccentBird = i % 17 == 0
-            let color: Color
-            if b.ping > 0 {
-                color = accent.opacity(0.35 + 0.65 * b.ping)
-            } else if isAccentBird {
-                color = accent.opacity(0.85)
-            } else {
-                color = ink.opacity(isPlaying ? 0.82 : 0.5)
-            }
-            canvas.stroke(path, with: .color(color),
-                          style: StrokeStyle(lineWidth: 1.9, lineCap: .round))
+        for g in grains {
+            let p = CGPoint(x: g.x * size.width, y: g.y * size.height)
+            let settled = g.bright
+            let alpha = 0.22 + settled * 0.75
+            let color = accentMix > 0.02
+                ? bone.mix(with: accent, by: accentMix * settled)
+                : bone
+            let r = 0.8 + settled * 1.0
+            canvas.fill(
+                Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                with: .color(color.opacity(alpha))
+            )
         }
     }
 
-    // MARK: Internals
-
-    private func stepPopulation() {
-        while birds.count < desiredCount { birds.append(hatch(edge: true)) }
-        if birds.count > desiredCount { birds.removeLast(birds.count - desiredCount) }
+    /// Cheap per-grain, per-frame pseudo-random in 0…1 (no allocation, no
+    /// shared RNG state across the hot loop).
+    private func rand(_ i: Int, _ date: Date, _ salt: Int) -> Double {
+        var h = UInt64(bitPattern: Int64(i &* 2654435761))
+        h ^= UInt64(bitPattern: Int64(date.timeIntervalSinceReferenceDate * 1000)) &* 0x9E3779B97F4A7C15
+        h ^= UInt64(salt &* 40503)
+        h = (h ^ (h >> 27)) &* 0x94D049BB133111EB
+        h ^= h >> 31
+        return Double(h % 100000) / 100000
     }
+}
 
-    private func hatch(edge: Bool) -> Bird {
-        let w = Double(size.width), h = Double(size.height)
-        let entering = migrationX != 0
-        let x: Double
-        let y: Double
-        if edge {
-            // Newcomers blow in from the side opposite the migration, or a
-            // random edge when the flock is simply growing.
-            let side = entering ? (migrationX < 0 ? w + 30 : -30) : (Bool.random() ? -30 : w + 30)
-            x = side
-            y = Double.random(in: h * 0.1...h * 0.75)
-        } else {
-            x = Double.random(in: w * 0.2...w * 0.8)
-            y = Double.random(in: h * 0.2...h * 0.6)
-        }
-        return Bird(
-            x: x, y: y,
-            vx: Double.random(in: -40...40) + (entering ? migrationX * 220 : 0),
-            vy: Double.random(in: -30...30),
-            seed: Double.random(in: 0...100)
-        )
-    }
-
-    private func assignTargets() {
-        guard !letterDots.isEmpty else { return }
-        var order = Array(birds.indices).shuffled()
-        // The nearest ~N birds take the letters; the rest keep flying as a
-        // halo around the words.
-        order = Array(order.prefix(letterDots.count * 2))
-        for (slot, birdIndex) in order.enumerated() {
-            birds[birdIndex].target = slot % 2 == 0 ? (slot / 2) % letterDots.count : -1
-        }
-        for i in birds.indices where !order.contains(i) {
-            birds[i].target = -1
-        }
-    }
-
-    private func fittedText(from title: String) -> String {
-        let clean = title.uppercased()
-        if clean.count <= 12 { return clean }
-        // Prefer the first word if the full title won't read at flock scale.
-        let first = clean.split(separator: " ").first.map(String.init) ?? clean
-        return String(first.prefix(12))
-    }
-
-    private static func layout(text: String, in size: CGSize) -> [CGPoint] {
-        let grid = DotMatrixFont.dotPositions(for: text)
-        guard let maxX = grid.map(\.x).max() else { return [] }
-        let columns = maxX + 1
-        let pitch = min(14, (size.width * 0.86) / columns)
-        let originX = (size.width - columns * pitch) / 2
-        let originY = size.height * 0.40 - 3.5 * pitch
-        return grid.map {
-            CGPoint(x: originX + $0.x * pitch + pitch / 2,
-                    y: originY + $0.y * pitch + pitch / 2)
-        }
+private extension Color {
+    /// Linear-ish blend in sRGB — good enough for grain tinting.
+    func mix(with other: Color, by t: Double) -> Color {
+        let a = UIColor(self), b = UIColor(other)
+        var ar: CGFloat = 0, ag: CGFloat = 0, ab: CGFloat = 0, aa: CGFloat = 0
+        var br: CGFloat = 0, bg: CGFloat = 0, bb: CGFloat = 0, ba: CGFloat = 0
+        a.getRed(&ar, green: &ag, blue: &ab, alpha: &aa)
+        b.getRed(&br, green: &bg, blue: &bb, alpha: &ba)
+        let f = CGFloat(min(max(t, 0), 1))
+        return Color(red: ar + (br - ar) * f, green: ag + (bg - ag) * f, blue: ab + (bb - ab) * f)
     }
 }
 
 // MARK: - Haptics
 
 enum Haptics {
-    static func tap() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-    }
-    static func boost() {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-    }
-    static func detent() {
-        UISelectionFeedbackGenerator().selectionChanged()
-    }
+    static func tap() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    static func boost() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+    static func detent() { UISelectionFeedbackGenerator().selectionChanged() }
 }

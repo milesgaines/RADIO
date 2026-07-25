@@ -31,9 +31,18 @@
         <string>UIInterfaceOrientationPortrait</string>
     </array>
 
-    <!-- Let the wheel, fireflies, and marquee run at 120 Hz on ProMotion. -->
+    <!-- Let the plate run at 120 Hz on ProMotion. -->
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
+
+    <!-- OFL-licensed display faces (see Resources/Fonts/OFL-*.txt). -->
+    <key>UIAppFonts</key>
+    <array>
+        <string>ClimateCrisis.ttf</string>
+        <string>GasoekOne-Regular.ttf</string>
+        <string>ArchivoBlack-Regular.ttf</string>
+        <string>InstrumentSerif-Regular.ttf</string>
+    </array>
 
     <!-- Keep audio playing (and votes flowing) in the background / in-car. -->
     <key>UIBackgroundModes</key>

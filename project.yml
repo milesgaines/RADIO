@@ -57,6 +57,9 @@ targets:
       - path: RealAudio
         type: folder
         buildPhase: resources
+      # OFL display faces (licenses alongside in OFL-*.txt).
+      - path: Resources/Fonts
+        buildPhase: resources
     dependencies:
       - target: RadioKit
     settings:
