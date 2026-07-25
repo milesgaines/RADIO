@@ -34,6 +34,9 @@ private struct PlateView: View {
     @State private var showProfile = false
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
     @State private var recordIsOn = false
+    @State private var dedicating = false
+    @State private var dedicationName = ""
+    @State private var momentMarked = false
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -91,6 +94,9 @@ private struct PlateView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
+                CrowdEmbers(count: stream.nowPlaying?.liveListeners ?? 1, accent: accent)
+                    .ignoresSafeArea()
+
                 chrome(in: geo.size)
 
                 if recordIsOn, let np = stream.nowPlaying {
@@ -103,6 +109,12 @@ private struct PlateView: View {
                             .font(.custom("Archivo Black", size: 14))
                             .tracking(2)
                             .foregroundStyle(ink.opacity(0.75))
+                        if let name = services.airLog.lastPayoffDedication {
+                            Text("this one goes out to \(name)")
+                                .font(.custom("Instrument Serif", size: 24))
+                                .foregroundStyle(ink)
+                                .padding(.top, 6)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(accent.opacity(0.96))
@@ -128,6 +140,20 @@ private struct PlateView: View {
             .gesture(gestures(in: geo.size))
             .sheet(isPresented: $showProfile) {
                 ProfileSheet(stream: stream, accent: accent)
+            }
+            .alert("Send it out", isPresented: $dedicating) {
+                TextField("who's it for", text: $dedicationName)
+                Button("SEND IT") {
+                    if let id = stream.nowPlaying?.track.id {
+                        services.castMyVote(.boost, on: id, dedication: dedicationName)
+                        plate.strike()
+                        Haptics.boost()
+                    }
+                    dedicationName = ""
+                }
+                Button("Cancel", role: .cancel) { dedicationName = "" }
+            } message: {
+                Text("Boosts this record and puts their name on it when it airs.")
             }
             .onAppear {
                 plate.configure(size: geo.size)
@@ -257,7 +283,8 @@ private struct PlateView: View {
                             .tracking(1.5)
                             .foregroundStyle(accent)
                         Ticker(text: "\(np.track.title) — \(np.track.artistName)"
-                               + (np.track.albumTitle.map { " — \($0)" } ?? ""),
+                               + (np.track.albumTitle.map { " — \($0)" } ?? "")
+                               + (services.airLog.dedication(for: np.track.id).map { " — for \($0)" } ?? ""),
                                font: .custom("Instrument Serif", size: 19),
                                color: bone)
                         if np.boostScore != 0 {
@@ -284,9 +311,11 @@ private struct PlateView: View {
                 }
             }
 
-            ControlDeck(stream: stream, accent: accent) { direction in
+            ControlDeck(stream: stream, accent: accent, onTune: { direction in
                 tune(direction)
-            }
+            }, onDedicate: {
+                dedicating = true
+            })
             .frame(maxWidth: .infinity)
             .padding(.top, 16)
         }
@@ -301,6 +330,17 @@ private struct PlateView: View {
                     .shadow(color: ink, radius: 20)
                     .transition(.scale(scale: 1.1).combined(with: .opacity))
                     .id(name)
+                    .allowsHitTesting(false)
+            }
+            if momentMarked {
+                Text("MARKED")
+                    .font(.custom("Archivo Black", size: 13))
+                    .tracking(3)
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .overlay(Rectangle().strokeBorder(accent, lineWidth: 1.5))
+                    .transition(.opacity)
                     .allowsHitTesting(false)
             }
         }
@@ -320,12 +360,23 @@ private struct PlateView: View {
                     vote(.bury)
                 }
             }
+        // Double-tap pins the moment to your ledger; single tap is power.
+        let mark = TapGesture(count: 2).onEnded {
+            if let np = stream.nowPlaying {
+                services.airLog.markMoment(track: np.track, station: stream.station)
+                Haptics.detent()
+                withAnimation(.easeIn(duration: 0.15)) { momentMarked = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                    withAnimation(.easeOut(duration: 0.5)) { momentMarked = false }
+                }
+            }
+        }
         let tap = TapGesture().onEnded {
             player.toggle()
             plate.isPlaying = player.isPlaying
             Haptics.tap()
         }
-        return swipe.exclusively(before: tap)
+        return swipe.exclusively(before: mark.exclusively(before: tap))
     }
 
     private func vote(_ direction: VoteDirection) {

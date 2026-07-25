@@ -20,7 +20,12 @@ public final class AirLog: ObservableObject {
         var plays: [Play] = []
         var wagers: Set<UUID> = []      // tracks this listener boosted
         var payoffs: Int = 0            // times a wagered record hit the air
+        var dedications: [UUID: String] = [:]  // "this one goes out to…"
+        var moments: [Play] = []        // instants this listener pinned
     }
+
+    /// Set when `logPlay` pays off a dedicated record — the name it was for.
+    public private(set) var lastPayoffDedication: String?
 
     @Published private var state = State()
     private let fileURL: URL
@@ -67,16 +72,38 @@ public final class AirLog: ObservableObject {
         if state.wagers.remove(track.id) != nil {
             state.payoffs += 1
             paidOff = true
+            lastPayoffDedication = state.dedications.removeValue(forKey: track.id)
         }
         save()
         return paidOff
     }
 
     /// This listener boosted a track — a bet that the station will play it.
-    public func logBoost(trackID: UUID) {
+    /// A dedication rides with it: radio's oldest ritual.
+    public func logBoost(trackID: UUID, dedication: String? = nil) {
         state.wagers.insert(trackID)
+        if let name = dedication?.trimmingCharacters(in: .whitespaces), !name.isEmpty {
+            state.dedications[trackID] = name
+        }
         save()
     }
+
+    /// The name riding on a track right now, if someone sent it out.
+    public func dedication(for trackID: UUID) -> String? {
+        state.dedications[trackID]
+    }
+
+    /// Pin this instant — a memory chosen on purpose.
+    public func markMoment(track: Track, station: Station) {
+        state.moments.append(Play(
+            trackID: track.id, title: track.title, artist: track.artistName,
+            stationName: station.name, at: now()
+        ))
+        if state.moments.count > 500 { state.moments.removeFirst() }
+        save()
+    }
+
+    public var recentMoments: [Play] { state.moments.suffix(4).reversed() }
 
     private func save() {
         guard let data = try? JSONEncoder().encode(state) else { return }

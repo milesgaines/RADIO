@@ -112,9 +112,9 @@ final class AppServices: ObservableObject {
 
     /// All of this listener's votes flow through here so every boost is
     /// also written into the ledger as a wager on the future.
-    func castMyVote(_ direction: VoteDirection, on trackID: UUID) {
+    func castMyVote(_ direction: VoteDirection, on trackID: UUID, dedication: String? = nil) {
         activeStream.vote(direction, on: trackID)
-        if direction == .boost { airLog.logBoost(trackID: trackID) }
+        if direction == .boost { airLog.logBoost(trackID: trackID, dedication: dedication) }
     }
 
     /// Bank accrued tenure now (scene background, termination).

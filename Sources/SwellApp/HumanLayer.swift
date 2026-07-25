@@ -73,6 +73,39 @@ struct Ticker: View {
     }
 }
 
+/// The audience, visible: one ember per listener drifting up the edges of
+/// the room. Not a number — company.
+struct CrowdEmbers: View {
+    let count: Int
+    let accent: Color
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            Canvas { canvas, size in
+                let n = min(count, 40)
+                for i in 0..<n {
+                    var h = UInt64(i) &* 0x9E3779B97F4A7C15 &+ 0xcbf29ce484222325
+                    h = (h ^ (h >> 31)) &* 0xBF58476D1CE4E5B9
+                    let leftSide = i % 2 == 0
+                    let speed = 14.0 + Double(h % 90) / 8
+                    let phase = Double(h % 9973)
+                    let rise = (t * speed + phase).truncatingRemainder(dividingBy: Double(size.height) + 80)
+                    let y = size.height + 30 - rise
+                    let sway = sin(t * 0.6 + phase) * 9
+                    let x = leftSide ? 14 + sway : Double(size.width) - 14 + sway
+                    let fade = min(1, rise / 140) * min(1, (Double(size.height) + 60 - rise) / 200)
+                    canvas.fill(
+                        Path(ellipseIn: CGRect(x: x - 1.4, y: y - 1.4, width: 2.8, height: 2.8)),
+                        with: .color(accent.opacity(0.5 * fade))
+                    )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 // MARK: - Control deck
 // Buttons for every gesture, so nothing about the radio is a secret.
 
@@ -82,6 +115,7 @@ struct ControlDeck: View {
     @EnvironmentObject private var player: RadioPlayer
     let accent: Color
     let onTune: (Int) -> Void
+    var onDedicate: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 14) {
@@ -115,12 +149,19 @@ struct ControlDeck: View {
                 }
             }
 
+            // Tap: boost. Hold: send it out to someone — radio's oldest ritual.
             deckButton(icon: "arrow.up", label: "BOOST", tint: accent) {
                 if let id = stream.nowPlaying?.track.id {
                     services.castMyVote(.boost, on: id)
                     Haptics.boost()
                 }
             }
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                    Haptics.detent()
+                    onDedicate()
+                }
+            )
 
             deckButton(icon: "chevron.right", label: "TUNE") { onTune(1) }
         }
@@ -283,6 +324,27 @@ struct ProfileSheet: View {
                 statRow("VERIFIED", listener.isVerified ? "YES" : "NO")
             }
             .overlay(Rectangle().strokeBorder(HumanTheme.bone.opacity(0.15), lineWidth: 1))
+
+            if !services.airLog.recentMoments.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("MARKED MOMENTS")
+                        .font(.custom("Archivo Black", size: 10))
+                        .tracking(1.5)
+                        .foregroundStyle(HumanTheme.dim)
+                    ForEach(Array(services.airLog.recentMoments.enumerated()), id: \.offset) { _, m in
+                        HStack {
+                            Text(m.at.formatted(date: .omitted, time: .shortened))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(accent)
+                                .monospacedDigit()
+                            Text("\(m.title) — \(m.stationName)")
+                                .font(.custom("Instrument Serif", size: 16))
+                                .foregroundStyle(HumanTheme.bone.opacity(0.85))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
 
             Spacer()
         }
