@@ -3,13 +3,18 @@
 <plist version="1.0">
 <dict>
     <!--
-      The CarPlay *audio* app entitlement. This is a managed entitlement:
-      Apple grants it on request via the CarPlay entitlement form
-      (https://developer.apple.com/contact/carplay/). Until it's granted the
-      CarPlay scene won't appear on real hardware, but the CarPlay Simulator
-      in Xcode (I/O ▸ External Displays ▸ CarPlay) works for development.
+      CarPlay (com.apple.developer.carplay-audio) is intentionally absent for
+      now: it is an Apple-managed entitlement that cannot be provisioned via
+      ASC API keys (archive fails with a misleading "Authentication failed"),
+      and it has not been granted yet. Request it at
+      https://developer.apple.com/contact/carplay/ and re-add:
+
+        <key>com.apple.developer.carplay-audio</key>
+        <true/>
+
+      Until then, CarPlay is developable in the simulator only
+      (I/O ▸ External Displays ▸ CarPlay), which does not require the
+      entitlement.
     -->
-    <key>com.apple.developer.carplay-audio</key>
-    <true/>
 </dict>
 </plist>

@@ -17,9 +17,11 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1.0"
+    # Matches the App Store Connect "RADIOSPLUS" record (Apple ID 6794523437),
+    # version 1.0 in Prepare for Submission.
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
-    DEVELOPMENT_TEAM: "" # set your team, or configure signing in Xcode
+    DEVELOPMENT_TEAM: "4XMMKU4W89" # Onesync Media LLC
 
 # The scheme the README's build/test commands use: builds the app, tests the
 # RadioKit unit suite.
@@ -44,7 +46,7 @@ targets:
       - Sources/RadioKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: fm.swell.kit
+        PRODUCT_BUNDLE_IDENTIFIER: RADIOPLUSAPP.kit
         GENERATE_INFOPLIST_FILE: YES
 
   Swell:
@@ -64,10 +66,12 @@ targets:
       - target: RadioKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: fm.swell.app
+        # The registered App Store Connect bundle id for RADIOSPLUS.
+        PRODUCT_BUNDLE_IDENTIFIER: RADIOPLUSAPP
         INFOPLIST_FILE: Sources/SwellApp/Info.plist
         CODE_SIGN_ENTITLEMENTS: Sources/SwellApp/Swell.entitlements
         GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   RadioKitTests:
     type: bundle.unit-test
