@@ -20,6 +20,8 @@ final class AppServices: ObservableObject {
     let meter: ListeningMeter
     /// The station's memory: airplays witnessed, boosts wagered.
     let airLog = AirLog()
+    /// The real numbers: presence + votes over Supabase realtime.
+    private let backend: RadioBackend
 
     @Published private(set) var activeStream: LiveStreamService
 
@@ -67,19 +69,28 @@ final class AppServices: ObservableObject {
         }
         self.streams = streams
 
-        // Each station gets its own crowd with a different size, so flipping
-        // between them feels like flipping between real rooms of people.
-        let crowdSizes = [38, 17, 26]
-        self.crowds = streams.enumerated().map { i, stream in
-            CrowdSimulator(stream: stream, config: .init(targetSize: crowdSizes[i % crowdSizes.count]))
-        }
+        // The fake crowd is retired: presence and votes are real now. The
+        // simulator class stays only for the test suite.
+        self.crowds = []
 
         let active = streams[0]
         self.activeStream = active
         self.player = RadioPlayer(stream: active)
+        self.backend = RadioBackend(listenerKey: listener.id.uuidString)
 
         streams.forEach { $0.start() }
-        crowds.forEach { $0.start() }
+
+        // Real numbers in: presence → the listener count, remote votes →
+        // the live tally of whichever station this device is tuned to.
+        backend.onPresenceCount = { [weak self] count in
+            self?.activeStream.setLiveListenerCount(count)
+        }
+        backend.onRemoteVote = { [weak self] trackID, direction, fromKey in
+            self?.activeStream.ingestRemoteVote(
+                direction > 0 ? .boost : .bury, on: trackID, fromKey: fromKey
+            )
+        }
+        backend.tune(toStationID: active.station.id.uuidString)
 
         // Listening tenure accrues while playback runs...
         player.$isPlaying
@@ -108,13 +119,19 @@ final class AppServices: ObservableObject {
         activeStream = stream
         player.attach(to: stream)
         player.refreshNowPlayingInfo()
+        backend.tune(toStationID: stream.station.id.uuidString)
     }
 
-    /// All of this listener's votes flow through here so every boost is
-    /// also written into the ledger as a wager on the future.
+    /// All of this listener's votes flow through here: local tally first
+    /// (instant), the wager ledger, then out to every other device.
     func castMyVote(_ direction: VoteDirection, on trackID: UUID, dedication: String? = nil) {
         activeStream.vote(direction, on: trackID)
         if direction == .boost { airLog.logBoost(trackID: trackID, dedication: dedication) }
+        backend.sendVote(
+            stationID: activeStream.station.id.uuidString,
+            trackID: trackID,
+            direction: direction.rawValue
+        )
     }
 
     /// Bank accrued tenure now (scene background, termination).
