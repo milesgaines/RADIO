@@ -46,7 +46,7 @@ targets:
       - Sources/RadioKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: RADIOPLUSAPP.kit
+        PRODUCT_BUNDLE_IDENTIFIER: com.onesync.swellradio.kit
         GENERATE_INFOPLIST_FILE: YES
 
   Swell:
@@ -66,10 +66,11 @@ targets:
       - target: RadioKit
     settings:
       base:
-        # ASC record "SWELL RADIO" (Apple ID 6794523437) — originally created
-        # as RADIOSPLUS, renamed 2026-07-24. Builds attach via this bundle id.
-        # (com.onesync.radioplus is also registered in the portal but unused.)
-        PRODUCT_BUNDLE_IDENTIFIER: RADIOPLUSAPP
+        # ASC record "SWELL RADIO" (Apple ID 6794523437). The record's Bundle ID
+        # must be set to com.onesync.swellradio in App Information for builds
+        # to attach. (RADIOPLUSAPP and com.onesync.radioplus remain registered
+        # but retired.)
+        PRODUCT_BUNDLE_IDENTIFIER: com.onesync.swellradio
         # iPhone-only: the plate is a portrait phone instrument, and ASC
         # rejects portrait-only bundles that also target iPad (error 90474).
         TARGETED_DEVICE_FAMILY: "1"
