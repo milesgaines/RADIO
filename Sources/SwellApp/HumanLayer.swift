@@ -157,8 +157,11 @@ struct ControlDeck: View {
     var onDedicate: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 14) {
+        // Five stations of equal width, edge to edge — a real control row,
+        // not a centered clump.
+        HStack(spacing: 0) {
             deckButton(icon: "chevron.left", label: "TUNE") { onTune(-1) }
+                .frame(maxWidth: .infinity)
 
             deckButton(icon: "arrow.down", label: "BURY", tint: HumanTheme.dim) {
                 if let id = stream.nowPlaying?.track.id {
@@ -166,6 +169,7 @@ struct ControlDeck: View {
                     Haptics.tap()
                 }
             }
+            .frame(maxWidth: .infinity)
 
             Button {
                 player.toggle()
@@ -180,13 +184,14 @@ struct ControlDeck: View {
                             .foregroundStyle(HumanTheme.ink)
                             .offset(x: player.isPlaying ? 0 : 1.5)
                     }
-                    .frame(width: 62, height: 62)
+                    .frame(width: 68, height: 68)
                     Text(player.isPlaying ? "ON AIR" : "TUNE IN")
                         .font(.custom("Archivo Black", size: 9))
-                        .tracking(1.2)
+                        .tracking(2)
                         .foregroundStyle(HumanTheme.dim)
                 }
             }
+            .frame(maxWidth: .infinity)
 
             // Tap: boost. Hold: send it out to someone — radio's oldest ritual.
             deckButton(icon: "arrow.up", label: "BOOST", tint: accent) {
@@ -201,8 +206,10 @@ struct ControlDeck: View {
                     onDedicate()
                 }
             )
+            .frame(maxWidth: .infinity)
 
             deckButton(icon: "chevron.right", label: "TUNE") { onTune(1) }
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -214,9 +221,9 @@ struct ControlDeck: View {
         Button(action: action) {
             VStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 46, height: 46)
+                    .frame(width: 54, height: 54)
                     .background(Circle().strokeBorder(HumanTheme.bone.opacity(0.22), lineWidth: 1))
                 Text(label)
                     .font(.custom("Archivo Black", size: 8))
@@ -283,7 +290,7 @@ struct WelcomeOverlay: View {
     private func rule(icon: String, color: Color, head: String, body text: String) -> some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(color)
                 .frame(width: 26)
             VStack(alignment: .leading, spacing: 3) {

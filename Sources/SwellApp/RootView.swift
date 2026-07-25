@@ -202,124 +202,129 @@ private struct PlateView: View {
     }
 
     // Whisper-thin type at the edges. Everything else is sand.
+    // Craft rules: one 24pt margin, one hairline (bone 15%), three ink
+    // levels only (1.0 / 0.55 / 0.28), Gasoek for the dial number alone,
+    // Archivo Black for everything else at exactly two sizes (10 / 13).
+    private var hairline: some View {
+        Rectangle().fill(bone.opacity(0.15)).frame(height: 1)
+    }
+
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 1) {
-                    RadioPlusMark(size: 22, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
-                    // Local, live, human — a station lives somewhere.
-                    HStack(spacing: 5) {
-                        Text("LOS ANGELES")
-                        Text("·")
-                        Text(Date.now, style: .time)
+            // Status bar: one line, baseline-locked, ruled underneath.
+            HStack(alignment: .center, spacing: 12) {
+                RadioPlusMark(size: 19, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
+                Text("LOS ANGELES")
+                    .font(.custom("Archivo Black", size: 10))
+                    .tracking(1.8)
+                    .foregroundStyle(bone.opacity(0.28))
+                    .lineLimit(1).fixedSize()
+                Text(Date.now, style: .time)
+                    .font(.custom("Archivo Black", size: 10))
+                    .tracking(1.8)
+                    .foregroundStyle(bone.opacity(0.28))
+                    .lineLimit(1).fixedSize()
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    if player.isPlaying {
+                        Circle().fill(accent).frame(width: 5, height: 5)
                     }
-                    .font(.custom("Archivo Black", size: 9))
-                    .tracking(1.2)
-                    .foregroundStyle(bone.opacity(0.72))
-                    .lineLimit(1)
-                    .fixedSize()
+                    Text(player.isPlaying
+                         ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
+                         : "OFF AIR")
+                        .font(.custom("Archivo Black", size: 10))
+                        .tracking(1.8)
+                        .foregroundStyle(player.isPlaying ? bone : bone.opacity(0.55))
+                        .monospacedDigit()
+                        .lineLimit(1).fixedSize()
                 }
-                Spacer()
-                HStack(spacing: 12) {
-                    HStack(spacing: 6) {
-                        if player.isPlaying {
-                            Circle().fill(accent).frame(width: 6, height: 6)
-                        }
-                        Text(player.isPlaying
-                             ? "LIVE · \(stream.nowPlaying?.liveListeners ?? 1)"
-                             : "RESTING")
-                            .font(.custom("Archivo Black", size: 12))
-                            .tracking(1)
-                            .foregroundStyle(bone.opacity(0.85))
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .fixedSize()
-                    }
-                    Button { showProfile = true } label: {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(bone.opacity(0.8))
-                            .frame(width: 34, height: 34)
-                            .background(Circle().strokeBorder(bone.opacity(0.25), lineWidth: 1))
-                    }
-                    Button {
-                        withAnimation(.easeIn(duration: 0.3)) { showWelcome = true }
-                    } label: {
-                        Image(systemName: "questionmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(bone.opacity(0.8))
-                            .frame(width: 34, height: 34)
-                            .background(Circle().strokeBorder(bone.opacity(0.25), lineWidth: 1))
-                    }
+                Button { showProfile = true } label: {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(bone.opacity(0.55))
+                        .frame(width: 32, height: 32)
+                }
+                Button {
+                    withAnimation(.easeIn(duration: 0.3)) { showWelcome = true }
+                } label: {
+                    Image(systemName: "questionmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(bone.opacity(0.55))
+                        .frame(width: 32, height: 32)
                 }
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 6)
+            .padding(.top, 2)
+            hairline.padding(.top, 4)
 
-            // THE STATION IS THE STAR. The song is just what's on air.
-            VStack(alignment: .leading, spacing: -6) {
-                Text(dialLabel.number)
-                    .font(.custom("Gasoek One", size: 96))
-                    .foregroundStyle(bone)
-                    .monospacedDigit()
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.5), value: dialLabel.number)
+            // The dial. One hero, one supporting line, same left edge.
+            Text(dialLabel.number)
+                .font(.custom("Gasoek One", size: 118))
+                .foregroundStyle(bone)
+                .monospacedDigit()
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.5), value: dialLabel.number)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.top, 10)
+            HStack(alignment: .center, spacing: 10) {
+                Text(stream.station.name.uppercased())
+                    .font(.custom("Archivo Black", size: 16))
+                    .tracking(2.5)
+                    .foregroundStyle(accent)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(stream.station.name.uppercased())
-                        .font(.custom("Gasoek One", size: 34))
-                        .foregroundStyle(accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                    if !dialLabel.unit.isEmpty {
-                        Text(dialLabel.unit)
-                            .font(.custom("Archivo Black", size: 13))
-                            .foregroundStyle(bone.opacity(0.5))
-                    }
-                    SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
+                    .minimumScaleFactor(0.6)
+                if !dialLabel.unit.isEmpty {
+                    Text(dialLabel.unit)
+                        .font(.custom("Archivo Black", size: 10))
+                        .tracking(1.8)
+                        .foregroundStyle(bone.opacity(0.55))
                 }
+                SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
             }
-            .shadow(color: ink, radius: 4)
-            .shadow(color: ink.opacity(0.85), radius: 18)
+            .padding(.top, -14)
 
             Spacer()
 
-            // Broadcast tickers, not a track hero.
+            // The chyron block: ruled top and bottom, two crawls, no serif.
             if let np = stream.nowPlaying {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(spacing: 8) {
-                        Text("ON AIR NOW")
+                hairline
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        Text("ON AIR")
                             .font(.custom("Archivo Black", size: 10))
-                            .tracking(1.5)
+                            .tracking(1.8)
                             .foregroundStyle(accent)
+                            .frame(width: 64, alignment: .leading)
                         Ticker(text: "\(np.track.title) — \(np.track.artistName)"
                                + (np.track.albumTitle.map { " — \($0)" } ?? "")
-                               + (services.airLog.dedication(for: np.track.id).map { " — for \($0)" } ?? ""),
-                               font: .custom("Instrument Serif", size: 19),
+                               + (services.airLog.dedication(for: np.track.id).map { " — FOR \($0.uppercased())" } ?? ""),
+                               font: .custom("Archivo Black", size: 13),
                                color: bone)
                         if np.boostScore != 0 {
                             Text(np.boostScore > 0 ? "▲\(np.boostScore)" : "▼\(-np.boostScore)")
-                                .font(.custom("Archivo Black", size: 12))
-                                .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.4))
+                                .font(.custom("Archivo Black", size: 13))
+                                .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.55))
                                 .monospacedDigit()
                                 .contentTransition(.numericText())
                                 .animation(.snappy, value: np.boostScore)
                         }
                     }
                     if !stream.upNextPreview.isEmpty {
-                        HStack(spacing: 8) {
-                            Text("UP NEXT")
+                        HStack(spacing: 10) {
+                            Text("NEXT")
                                 .font(.custom("Archivo Black", size: 10))
-                                .tracking(1.5)
-                                .foregroundStyle(bone.opacity(0.65))
-                            Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "  ·  ")
-                                   + "  ·  crowd-programmed",
-                                   font: .custom("Instrument Serif", size: 16),
-                                   color: bone.opacity(0.72), speed: 22)
+                                .tracking(1.8)
+                                .foregroundStyle(bone.opacity(0.28))
+                                .frame(width: 64, alignment: .leading)
+                            Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "   /   ")
+                                   + "   /   CROWD-PROGRAMMED",
+                                   font: .custom("Archivo Black", size: 13),
+                                   color: bone.opacity(0.55), speed: 20)
                         }
                     }
                 }
+                .padding(.vertical, 12)
+                hairline
             }
 
             ControlDeck(stream: stream, accent: accent, onTune: { direction in
@@ -328,11 +333,11 @@ private struct PlateView: View {
                 dedicating = true
             })
             .frame(maxWidth: .infinity)
-            .padding(.top, 16)
+            .padding(.top, 14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 22)
-        .padding(.bottom, 22)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 16)
         .overlay {
             if let name = stationFlash {
                 Text(name.uppercased())
