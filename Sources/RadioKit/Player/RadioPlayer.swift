@@ -51,11 +51,21 @@ public final class RadioPlayer: ObservableObject {
     private var tapInstalled = false
     private var lastPublish = Date.distantPast
 
+    /// Identity of the segment currently scheduled on the node. Votes and
+    /// audience churn republish `nowPlaying` without moving the broadcast;
+    /// only a new (track, startedAt) pair may touch the audio graph.
+    private struct LoadKey: Equatable {
+        let trackID: UUID
+        let startedAt: Date
+    }
+    private var loadedKey: LoadKey?
+
     public init(stream: LiveStreamService) {
         self.stream = stream
         engine.attach(node)
         configureAudioSession()
         configureRemoteCommands()
+        observeSystemAudioEvents()
         attach(to: stream)
     }
 
@@ -68,7 +78,18 @@ public final class RadioPlayer: ObservableObject {
 
         stream.$nowPlaying
             .compactMap { $0 }
-            .sink { [weak self] np in self?.load(np) }
+            .sink { [weak self] np in
+                guard let self else { return }
+                // Reschedule audio only when the broadcast actually moved —
+                // every vote and every listener join/leave republishes this
+                // struct, and a stop/reschedule per vote is an audible glitch.
+                let key = LoadKey(trackID: np.track.id, startedAt: np.startedAt)
+                if key != self.loadedKey {
+                    self.load(np)
+                } else {
+                    self.refreshNowPlayingInfo()
+                }
+            }
             .store(in: &cancellables)
 
         if let np = stream.nowPlaying { load(np) }
@@ -79,7 +100,11 @@ public final class RadioPlayer: ObservableObject {
         // Radio, not a podcast: joining or resuming drops you at the *live*
         // second, never where you left off.
         isPlaying = true
-        if let np = stream.nowPlaying { load(np) } else { startEngineIfNeeded() }
+        if let np = stream.nowPlaying {
+            load(np)
+        } else if !startEngineIfNeeded() {
+            isPlaying = false // stay truthful if the session won't activate
+        }
         refreshNowPlayingInfo()
     }
 
@@ -96,6 +121,7 @@ public final class RadioPlayer: ObservableObject {
 
     /// Open the track's asset and schedule it from the live edge.
     private func load(_ np: NowPlaying) {
+        loadedKey = LoadKey(trackID: np.track.id, startedAt: np.startedAt)
         guard let url = np.track.assetURL else {
             node.stop()
             refreshNowPlayingInfo()
@@ -118,8 +144,9 @@ public final class RadioPlayer: ObservableObject {
                 frameCount: AVAudioFrameCount(remaining),
                 at: nil
             )
-            if isPlaying {
-                startEngineIfNeeded()
+            // node.play() on a non-running engine raises an uncatchable
+            // NSException — only play once the engine is genuinely up.
+            if isPlaying, startEngineIfNeeded() {
                 node.play()
             }
         } catch {
@@ -138,12 +165,63 @@ public final class RadioPlayer: ObservableObject {
         currentFormat = format
     }
 
-    private func startEngineIfNeeded() {
+    @discardableResult
+    private func startEngineIfNeeded() -> Bool {
         installTapIfNeeded()
-        guard !engine.isRunning else { return }
+        if engine.isRunning { return true }
         engine.prepare()
-        try? engine.start()
+        do {
+            try engine.start()
+            return true
+        } catch {
+            return false
+        }
     }
+
+    /// Interruptions (calls, Siri) and route/config changes (headphones,
+    /// CarPlay) stop the engine out from under us. Without handling, the UI
+    /// claims "playing" over silence and the next reschedule can crash.
+    private func observeSystemAudioEvents() {
+        #if os(iOS)
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: nil, queue: .main
+        ) { [weak self] note in
+            let info = note.userInfo
+            Task { @MainActor [weak self] in self?.handleInterruption(info) }
+        }
+        #endif
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.isPlaying else { return }
+                // Rejoin the live edge on the new route/graph.
+                if let np = self.stream.nowPlaying { self.load(np) }
+            }
+        }
+    }
+
+    #if os(iOS)
+    private func handleInterruption(_ info: [AnyHashable: Any]?) {
+        guard let raw = info?[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            pause() // UI stays truthful: we are not playing
+        case .ended:
+            let options = (info?[AVAudioSessionInterruptionOptionKey] as? UInt)
+                .map(AVAudioSession.InterruptionOptions.init(rawValue:)) ?? []
+            if options.contains(.shouldResume) {
+                try? AVAudioSession.sharedInstance().setActive(true)
+                play() // rejoins at the live edge by design
+            }
+        @unknown default:
+            break
+        }
+    }
+    #endif
 
     /// The tap runs on an audio thread: analysis is allocation-free, and
     /// results hop to the main actor at ~30 Hz.

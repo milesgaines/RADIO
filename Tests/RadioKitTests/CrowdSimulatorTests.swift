@@ -41,6 +41,22 @@ final class CrowdSimulatorTests: XCTestCase {
         XCTAssertEqual(stream.nowPlaying?.liveListeners, 1)
     }
 
+    func testEmptyCatalogDoesNotFreezeTheMainActor() async {
+        // Regression: the run loop used to busy-spin the main actor when
+        // nothing was schedulable, which froze the UI and made stop()
+        // undeliverable. This test *hangs* on the broken code.
+        let stream = LiveStreamService(
+            station: MockCatalog.flagshipStation,
+            catalog: [],
+            now: { self.t0 },
+            random: seededRandom()
+        )
+        stream.start()
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        stream.stop()
+        XCTAssertNil(stream.nowPlaying, "Empty catalog stays silent — but must never hang")
+    }
+
     func testDeviceListenerCanNeverLeave() {
         let stream = makeStream(random: seededRandom())
         stream.leave(stream.currentListener.id)

@@ -75,7 +75,17 @@ public final class LiveStreamService: ObservableObject {
 
     private func runLoop() async {
         while !Task.isCancelled {
-            guard let np = nowPlaying else { advance(); continue }
+            guard let np = nowPlaying else {
+                advance()
+                if nowPlaying == nil {
+                    // Nothing schedulable (empty or fully unlicensed
+                    // catalog). Retry at a human cadence — a tight loop
+                    // here would monopolize the main actor and freeze
+                    // the UI with no way to deliver stop().
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
+                continue
+            }
             let remaining = np.track.durationSeconds - np.elapsed(at: now())
             let sleepFor = max(0.25, remaining)
             try? await Task.sleep(nanoseconds: UInt64(sleepFor * 1_000_000_000))

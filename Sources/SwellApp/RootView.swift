@@ -410,13 +410,20 @@ final class CymaticPlate {
         // On bass hits and boosts, the settled figure glows the station color.
         let accentMix = min(1, bass * 0.7 + (striking ? 0.6 : 0))
 
+        // Blend a small ramp ONCE per frame — per-grain UIColor bridging at
+        // 3,400 grains melts the frame budget the moment bass is audible.
+        let rampSteps = 6
+        let ramp: [Color] = (0..<rampSteps).map { i in
+            accentMix > 0.02
+                ? bone.mix(with: accent, by: accentMix * Double(i) / Double(rampSteps - 1))
+                : bone
+        }
+
         for g in grains {
             let p = CGPoint(x: g.x * size.width, y: g.y * size.height)
             let settled = g.bright
             let alpha = 0.22 + settled * 0.75
-            let color = accentMix > 0.02
-                ? bone.mix(with: accent, by: accentMix * settled)
-                : bone
+            let color = ramp[min(rampSteps - 1, Int(settled * Double(rampSteps)))]
             let r = 0.8 + settled * 1.0
             canvas.fill(
                 Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
