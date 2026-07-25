@@ -43,6 +43,10 @@ public final class SupabaseScheduleSource: StationScheduleSource, ObservableObje
         public var endBufferSeconds: Double
         /// Subscribe to Realtime for instant updates on top of polling.
         public var useRealtime: Bool
+        /// A heartbeat counts toward "listening now" for this long. Must
+        /// comfortably exceed `maxPollSeconds` (heartbeats ride the poll), or
+        /// live listeners would flicker out between polls.
+        public var presenceWindowSeconds: Double
 
         public init(
             client: SupabaseRadioClient.Config = .oneSync,
@@ -50,7 +54,8 @@ public final class SupabaseScheduleSource: StationScheduleSource, ObservableObje
             maxPollSeconds: Double = 30,
             minPollSeconds: Double = 2,
             endBufferSeconds: Double = 0.75,
-            useRealtime: Bool = true
+            useRealtime: Bool = true,
+            presenceWindowSeconds: Double = 75
         ) {
             self.client = client
             self.stationID = stationID
@@ -58,6 +63,7 @@ public final class SupabaseScheduleSource: StationScheduleSource, ObservableObje
             self.minPollSeconds = minPollSeconds
             self.endBufferSeconds = endBufferSeconds
             self.useRealtime = useRealtime
+            self.presenceWindowSeconds = presenceWindowSeconds
         }
     }
 
@@ -192,16 +198,39 @@ public final class SupabaseScheduleSource: StationScheduleSource, ObservableObje
         do {
             guard let result = try await client.fetchNowPlaying(stationID: stationID) else {
                 connectionState = .live
+                await updatePresence(stationID: stationID)
                 return config.maxPollSeconds
             }
             connectionState = .live
             if let sample = result.clockSample { clock.ingest(sample) }
             apply(result.slot, track: result.track)
+            await updatePresence(stationID: stationID)
             return interval(until: result.slot)
         } catch {
-            // Keep rendering the last slot; try again soon.
+            // Keep rendering the last slot; try again soon. A count from a
+            // previous poll is stale news now — better no number than a
+            // frozen one.
             connectionState = .offline
+            liveListenerCount = nil
             return min(config.maxPollSeconds, max(config.minPollSeconds, 5))
+        }
+    }
+
+    /// Heartbeat, then read back how many listeners are live. Rides the poll
+    /// cadence: about one beat per song. Best-effort — a failed heartbeat
+    /// only means this listener may briefly not be counted.
+    private func updatePresence(stationID: UUID) async {
+        try? await client.sendHeartbeat(stationID: stationID, listenerKey: listenerKey)
+        // The cutoff is quoted in station time because the server stamps
+        // `last_seen` with its clock, not ours.
+        let cutoff = clock.stationTime(forDevice: now())
+            .addingTimeInterval(-config.presenceWindowSeconds)
+        guard let count = try? await client.fetchListenerCount(stationID: stationID, since: cutoff) else {
+            return
+        }
+        if count != liveListenerCount {
+            liveListenerCount = count
+            onScheduleChange?()
         }
     }
 

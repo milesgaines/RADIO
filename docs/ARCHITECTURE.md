@@ -105,6 +105,16 @@ teaser on the shared station (`supportsLocalPreview == false`) — the client
 genuinely doesn't know what's next, which is exactly the non-interactive
 property the licensing design wants.
 
+Listener counts ride the same poll. Each poll upserts a heartbeat into
+`radio_listeners` (`(station_id, listener_key)` primary key; `last_seen` is
+stamped server-side by trigger, so a wrong device clock can't fake
+freshness) and reads back the count of heartbeats in the trailing 75-second
+window — via `Prefer: count=exact` + `Range: 0-0`, so the answer is a
+`Content-Range` header and the payload stays one row at any audience size.
+The window is a couple of poll intervals wide, so a live listener never
+flickers out between beats, and the cutoff is quoted in *station* time
+because that's the clock that stamped the rows.
+
 ## Where each research finding lives in code
 
 | Research finding | Module | What it does |

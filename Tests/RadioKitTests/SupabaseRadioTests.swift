@@ -190,6 +190,61 @@ final class SupabaseRadioTests: XCTestCase {
         XCTAssertEqual(json?["direction"] as? Int, -1, "bury encodes as -1")
     }
 
+    // MARK: - Listener presence
+
+    func testHeartbeatUpsertsWithMergeDuplicates() async throws {
+        let stationID = UUID()
+        var captured: (method: String?, prefer: String?, body: Data?)?
+
+        StubURLProtocol.handler = { request in
+            captured = (request.httpMethod,
+                        request.value(forHTTPHeaderField: "Prefer"),
+                        request.httpBodyData)
+            return (201, [:], Data())
+        }
+
+        let client = stubbedClient()
+        try await client.sendHeartbeat(stationID: stationID, listenerKey: "listener-abcdef")
+
+        XCTAssertEqual(captured?.method, "POST")
+        XCTAssertTrue(captured?.prefer?.contains("resolution=merge-duplicates") == true,
+                      "The second beat must upsert, not 409 on the primary key")
+        let json = try JSONSerialization.jsonObject(with: try XCTUnwrap(captured?.body)) as? [String: Any]
+        XCTAssertEqual(json?["station_id"] as? String, stationID.uuidString.lowercased())
+        XCTAssertEqual(json?["listener_key"] as? String, "listener-abcdef")
+        XCTAssertNil(json?["last_seen"], "last_seen is server-stamped — the body must not carry a clock")
+    }
+
+    func testListenerCountParsesContentRangeAndQuotesStationTime() async throws {
+        let stationID = UUID()
+        var capturedURL: URL?
+
+        StubURLProtocol.handler = { request in
+            capturedURL = request.url
+            return (206, ["Content-Range": "0-0/17"], Data("[]".utf8))
+        }
+
+        let client = stubbedClient()
+        let since = Date(timeIntervalSince1970: 1_785_003_925) // 18:25:25Z
+        let count = try await client.fetchListenerCount(stationID: stationID, since: since)
+
+        XCTAssertEqual(count, 17, "The count rides the Content-Range header, not the body")
+        let query = capturedURL?.query?.removingPercentEncoding ?? ""
+        XCTAssertTrue(query.contains("last_seen=gte.2026-07-25T18:25:25Z"),
+                      "The cutoff is an ISO-8601 UTC instant, got: \(query)")
+    }
+
+    func testListenerCountWithoutContentRangeThrows() async {
+        StubURLProtocol.handler = { _ in (200, [:], Data("[]".utf8)) }
+        let client = stubbedClient()
+        do {
+            _ = try await client.fetchListenerCount(stationID: UUID(), since: Date())
+            XCTFail("expected malformed error when Content-Range is missing")
+        } catch {
+            // expected
+        }
+    }
+
     func testBadStatusThrows() async {
         StubURLProtocol.handler = { _ in (500, [:], Data("boom".utf8)) }
         let client = stubbedClient()
