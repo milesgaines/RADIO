@@ -7,8 +7,10 @@ import RadioKit
 struct SettingsView: View {
     @AppStorage(NavidromeConfig.StorageKey.baseURL) private var baseURL: String = ""
     @AppStorage(NavidromeConfig.StorageKey.username) private var username: String = ""
-    // Demo-grade storage; move to the Keychain before shipping.
-    @AppStorage(NavidromeConfig.StorageKey.password) private var password: String = ""
+    /// The password is keychain-held, so it can't be an `@AppStorage` binding:
+    /// it's loaded on appear and written back only once a server has accepted
+    /// it. See `NavidromeConfig.SecretKey.password`.
+    @State private var password: String = ""
 
     @ObservedObject private var services = AppServices.shared
 
@@ -47,7 +49,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Navidrome server")
                 } footer: {
-                    Text("Self-host your catalog with Navidrome — see navidrome.org/docs/installation. RADIO+ streams via the Subsonic API; your password never leaves the device un-hashed.")
+                    Text("Self-host your catalog with Navidrome — see navidrome.org/docs/installation. RADIO+ streams via the Subsonic API; your password is kept in the device keychain and never leaves the device un-hashed.")
                 }
 
                 Section {
@@ -74,6 +76,13 @@ struct SettingsView: View {
                     if case .failed(let message) = testState {
                         Text(message).font(.caption).foregroundStyle(.red)
                     }
+
+                    // Clearing the field alone no longer forgets the password
+                    // now that it lives in the keychain, so say it explicitly.
+                    Button("Forget saved password", role: .destructive) {
+                        forgetPassword()
+                    }
+                    .disabled(password.isEmpty)
                 }
 
                 Section {
@@ -86,7 +95,23 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear(perform: loadStoredPassword)
         }
+    }
+
+    /// Pull the saved password out of the keychain so the field reflects what
+    /// the station is actually connecting with.
+    private func loadStoredPassword() {
+        guard password.isEmpty else { return }
+        password = KeychainSecretStore.shared
+            .secret(forKey: NavidromeConfig.SecretKey.password) ?? ""
+    }
+
+    private func forgetPassword() {
+        try? NavidromeConfig.forgetPassword()
+        password = ""
+        testState = .idle
+        AppServices.shared.reloadCatalog()
     }
 
     private func testConnection() {
@@ -99,6 +124,8 @@ struct SettingsView: View {
         Task {
             do {
                 try await NavidromeClient(config: config).ping()
+                // Only ever persist a credential the server has accepted.
+                try config.savePassword()
                 testState = .ok
                 AppServices.shared.reloadCatalog()
             } catch {

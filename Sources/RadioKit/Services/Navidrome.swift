@@ -8,7 +8,9 @@ import CryptoKit
 ///
 /// Auth follows the Subsonic token scheme: per-request random salt `s` and
 /// token `t = md5(password + s)` — the password itself never goes on the wire.
-public struct NavidromeConfig: Codable, Equatable, Sendable {
+/// Deliberately not `Codable`: nothing should be able to serialise this struct
+/// wholesale, because that would put the password back into plain storage.
+public struct NavidromeConfig: Equatable, Sendable {
     public var baseURL: URL
     public var username: String
     public var password: String
@@ -20,22 +22,81 @@ public struct NavidromeConfig: Codable, Equatable, Sendable {
     }
 
     /// UserDefaults keys shared with the app's Settings screen (@AppStorage).
-    /// Demo-grade storage — move the password to the Keychain before shipping.
+    /// The password is *not* one of them — it lives in the keychain under
+    /// `SecretKey.password`.
     public enum StorageKey {
         public static let baseURL = "navidrome.baseURL"
         public static let username = "navidrome.username"
+        /// Where builds up to 0.1.0 kept the password in plain text. Read only
+        /// by `migrateLegacyPassword`, which moves it into the keychain.
+        public static let legacyPassword = "navidrome.password"
+    }
+
+    /// Keychain account names (`kSecAttrAccount`) for our secrets.
+    public enum SecretKey {
         public static let password = "navidrome.password"
     }
 
-    /// Build a config from UserDefaults; nil when not (fully) configured.
-    public static func fromDefaults(_ defaults: UserDefaults = .standard) -> NavidromeConfig? {
+    /// Build a config from the stored server details plus the keychain-held
+    /// password; nil when not (fully) configured.
+    public static func fromDefaults(
+        _ defaults: UserDefaults = .standard,
+        secrets: any SecretStore = KeychainSecretStore.shared
+    ) -> NavidromeConfig? {
         guard
-            let raw = defaults.string(forKey: StorageKey.baseURL),
-            let url = URL(string: raw), !raw.isEmpty,
+            let raw = defaults.string(forKey: StorageKey.baseURL), !raw.isEmpty,
+            let url = URL(string: raw),
             let user = defaults.string(forKey: StorageKey.username), !user.isEmpty,
-            let pass = defaults.string(forKey: StorageKey.password), !pass.isEmpty
+            let pass = secrets.secret(forKey: SecretKey.password), !pass.isEmpty
         else { return nil }
         return NavidromeConfig(baseURL: url, username: user, password: pass)
+    }
+
+    /// Persist the password to the keychain. The server URL and username are
+    /// ordinary preferences and are written by the Settings screen's
+    /// `@AppStorage` bindings.
+    public func savePassword(to secrets: any SecretStore = KeychainSecretStore.shared) throws {
+        try secrets.setSecret(password, forKey: SecretKey.password)
+    }
+
+    /// Forget the stored password, leaving the server URL and username alone.
+    public static func forgetPassword(
+        _ secrets: any SecretStore = KeychainSecretStore.shared
+    ) throws {
+        try secrets.removeSecret(forKey: SecretKey.password)
+    }
+
+    /// Move a password written by an earlier build out of `UserDefaults` and
+    /// into the keychain, then delete the plain-text copy. Safe to call on
+    /// every launch; a no-op once there's nothing left in plain text.
+    ///
+    /// - Returns: `true` when a legacy password was moved into the keychain.
+    @discardableResult
+    public static func migrateLegacyPassword(
+        _ defaults: UserDefaults = .standard,
+        secrets: any SecretStore = KeychainSecretStore.shared
+    ) -> Bool {
+        guard
+            let legacy = defaults.string(forKey: StorageKey.legacyPassword),
+            !legacy.isEmpty
+        else { return false }
+
+        if let existing = secrets.secret(forKey: SecretKey.password), !existing.isEmpty {
+            // The keychain is already authoritative — drop the stale copy
+            // rather than letting it overwrite a newer password.
+            defaults.removeObject(forKey: StorageKey.legacyPassword)
+            return false
+        }
+
+        // Only clear the plain-text copy once the keychain actually has it, so
+        // a failed write can't lock a listener out of their own server.
+        do {
+            try secrets.setSecret(legacy, forKey: SecretKey.password)
+        } catch {
+            return false
+        }
+        defaults.removeObject(forKey: StorageKey.legacyPassword)
+        return true
     }
 }
 

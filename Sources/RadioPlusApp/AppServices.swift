@@ -20,6 +20,10 @@ final class AppServices: ObservableObject {
     @Published private(set) var catalogSource: CatalogSource = .demo
 
     private init() {
+        // Builds up to 0.1.0 kept the Navidrome password in UserDefaults; move
+        // any leftover plain-text copy into the keychain before the first read.
+        NavidromeConfig.migrateLegacyPassword()
+
         let stream = LiveStreamService()
         self.stream = stream
         self.player = RadioPlayer(stream: stream)

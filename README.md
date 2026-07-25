@@ -67,8 +67,13 @@ xcodebuild test \
    the lot. Votes and anti-gaming work exactly the same.
 
 Auth uses the Subsonic salted-token scheme (`t = md5(password + salt)`), so the
-password never goes over the wire. Password storage is demo-grade
-(`UserDefaults`) — move it to the Keychain before shipping.
+password never goes over the wire. On the device it's held in the **keychain**
+(`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so the station can refresh
+its catalog on a locked phone but the credential never lands in a backup) and
+is only written once a server has accepted it. The server URL and username are
+ordinary `UserDefaults` preferences. A password left in `UserDefaults` by an
+earlier build is migrated into the keychain on first launch and the plain-text
+copy deleted.
 
 ### Trying CarPlay
 

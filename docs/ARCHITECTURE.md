@@ -51,6 +51,7 @@ is covered by unit tests.
 | CarPlay = consumption + one interaction | `CarPlaySceneDelegate`, `RadioPlayer` | Templates only; `likeCommand` → boost; `nextTrackCommand` disabled (no hand-picking). |
 | OneSync catalog swap | `MockCatalog` | The only place the demo data lives; replace with the real opt-in feed. |
 | Real streaming backend | `NavidromeClient` (`Navidrome.swift`) | Subsonic-API client for a self-hosted Navidrome server: salted-token auth, catalog fetch → `Track`s with stream + artwork URLs. Configured in the app's Settings tab; `AppServices.reloadCatalog()` swaps it into the live rotation. |
+| Credentials off plain storage | `SecretStore` (`SecretStore.swift`), `NavidromeConfig` | The Navidrome password lives in the keychain (`KeychainSecretStore`), never `UserDefaults`; server URL + username stay plain preferences. `migrateLegacyPassword()` moves a pre-0.1.0 plain-text password across on launch. `InMemorySecretStore` lets the tests cover it unsigned. |
 | Joined-in-progress playback | `RadioPlayer.load` | Seeks each new asset to the stream's elapsed offset so every listener hears the same second. |
 
 ## Design invariants (enforced by tests)
@@ -61,6 +62,7 @@ is covered by unit tests.
 - **Fresh/unverified accounts barely count** (`testFreshAccountVoteIsHeavilyDiscounted`).
 - **Unlicensed masters are never scheduled** (`testUnlicensedTrackIsNeverScheduled`).
 - **No third consecutive track by one artist** (`testConsecutiveArtistCapEnforced`).
+- **The server password never comes from `UserDefaults`** (`testConfigIsNilWhenTheSecretStoreHasNoPassword`, `testSavingAPasswordNeverTouchesUserDefaults`) and a legacy plain-text copy is migrated exactly once (`testLegacyPlainTextPasswordIsMovedIntoTheSecretStore`, `testMigrationIsIdempotent`).
 
 ## Swapping the mock for production
 
