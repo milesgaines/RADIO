@@ -55,6 +55,12 @@ private struct PlateView: View {
             ZStack {
                 ink.ignoresSafeArea()
 
+                // The room floods with station color on every kick.
+                accent
+                    .opacity(0.04 + Double(player.levels.bass) * 0.13)
+                    .animation(.linear(duration: 0.1), value: Int(player.levels.bass * 8))
+                    .ignoresSafeArea()
+
                 TimelineView(.animation(minimumInterval: 1.0 / 60)) { context in
                     Canvas { canvas, size in
                         plate.stepAndDraw(in: canvas, size: size, date: context.date)
@@ -67,11 +73,14 @@ private struct PlateView: View {
                 .layerEffect(
                     ShaderLibrary.aberration(
                         .float2(geo.size),
-                        .float(1.0 + player.levels.bass * 4.5)
+                        .float(1.5 + player.levels.bass * 7)
                     ),
-                    maxSampleOffset: CGSize(width: 8, height: 8)
+                    maxSampleOffset: CGSize(width: 11, height: 11)
                 )
                 .colorEffect(ShaderLibrary.filmGrain(.float(0.09)))
+                // The whole plate pounds with the kick.
+                .scaleEffect(1 + CGFloat(player.levels.bass) * 0.022)
+                .animation(.linear(duration: 0.09), value: Int(player.levels.bass * 10))
 
                 // Bottom scrim so type reads over the densest sand — a wash,
                 // not a card.
@@ -214,28 +223,28 @@ private struct PlateView: View {
             .padding(.top, 6)
 
             // THE STATION IS THE STAR. The song is just what's on air.
-            HStack(alignment: .lastTextBaseline, spacing: 14) {
+            VStack(alignment: .leading, spacing: -6) {
                 Text(String(format: "%.1f", frequency))
-                    .font(.custom("Gasoek One", size: 66))
+                    .font(.custom("Gasoek One", size: 96))
                     .foregroundStyle(bone)
                     .monospacedDigit()
                     .contentTransition(.numericText())
                     .animation(.easeInOut(duration: 0.6), value: frequency)
-                VStack(alignment: .leading, spacing: 2) {
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(stream.station.name.uppercased())
-                        .font(.custom("Gasoek One", size: 24))
+                        .font(.custom("Gasoek One", size: 34))
                         .foregroundStyle(accent)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                    HStack(spacing: 8) {
-                        Text("FM")
-                            .font(.custom("Archivo Black", size: 11))
-                            .foregroundStyle(bone.opacity(0.5))
-                        SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
-                    }
+                        .minimumScaleFactor(0.5)
+                    Text("FM")
+                        .font(.custom("Archivo Black", size: 13))
+                        .foregroundStyle(bone.opacity(0.5))
+                    SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
                 }
             }
-            .shadow(color: ink.opacity(0.6), radius: 12)
+            .shadow(color: ink.opacity(0.7), radius: 14)
 
             Spacer()
 
@@ -512,24 +521,36 @@ final class CymaticPlate {
     private func draw(canvas: GraphicsContext, size: CGSize, bass: Double, striking: Bool) {
         let bone = Color(red: 0.965, green: 0.945, blue: 0.9)
         let accent = Self.accents[accentIndex % Self.accents.count]
-        // On bass hits and boosts, the settled figure glows the station color.
-        let accentMix = min(1, bass * 0.7 + (striking ? 0.6 : 0))
+        // The figure runs molten by default and goes hotter on every kick.
+        let accentMix = min(1, 0.35 + bass * 0.65 + (striking ? 0.5 : 0))
 
         // Blend a small ramp ONCE per frame — per-grain UIColor bridging at
         // 3,400 grains melts the frame budget the moment bass is audible.
         let rampSteps = 6
         let ramp: [Color] = (0..<rampSteps).map { i in
-            accentMix > 0.02
-                ? bone.mix(with: accent, by: accentMix * Double(i) / Double(rampSteps - 1))
-                : bone
+            bone.mix(with: accent, by: accentMix * Double(i) / Double(rampSteps - 1))
+        }
+
+        // Glow pass: the settled figure burns. Blurred fat accent dots under
+        // the crisp sand read as neon energy, not dust.
+        var glow = canvas
+        glow.addFilter(.blur(radius: 7))
+        let glowAlpha = 0.28 + bass * 0.45 + (striking ? 0.3 : 0)
+        for g in grains where g.bright > 0.55 {
+            let p = CGPoint(x: g.x * size.width, y: g.y * size.height)
+            let r = 3.2 + g.bright * 2.4
+            glow.fill(
+                Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
+                with: .color(accent.opacity(glowAlpha * g.bright))
+            )
         }
 
         for g in grains {
             let p = CGPoint(x: g.x * size.width, y: g.y * size.height)
             let settled = g.bright
-            let alpha = 0.22 + settled * 0.75
+            let alpha = 0.35 + settled * 0.65
             let color = ramp[min(rampSteps - 1, Int(settled * Double(rampSteps)))]
-            let r = 0.8 + settled * 1.0
+            let r = 1.1 + settled * 1.4
             canvas.fill(
                 Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
                 with: .color(color.opacity(alpha))
