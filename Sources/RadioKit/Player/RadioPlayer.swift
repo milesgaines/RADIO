@@ -132,7 +132,7 @@ public final class RadioPlayer: ObservableObject {
         if url.scheme == "https" || url.scheme == "http" {
             let key = loadedKey
             let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("radio-\(np.track.id.uuidString).\(url.pathExtension.isEmpty ? "wav" : url.pathExtension)")
+                .appendingPathComponent("radio-\(np.track.id.uuidString).\(url.pathExtension.isEmpty ? "mp3" : url.pathExtension)")
             Task { @MainActor [weak self] in
                 if !FileManager.default.fileExists(atPath: cache.path) {
                     guard let (tmp, _) = try? await URLSession.shared.download(from: url) else { return }

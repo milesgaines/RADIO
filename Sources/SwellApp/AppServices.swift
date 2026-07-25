@@ -69,6 +69,14 @@ final class AppServices: ObservableObject {
             tagline: "The crowd breaks records here.",
             catalogArtistIDs: []
         ), []))
+        // THE WAVE: what's trending across the open web right now (Audius) —
+        // full-length, legal, hydrated over the air. Music that's actually out.
+        stationCatalogs.append((Station(
+            id: FolderCatalog.stableID("station:the wave"),
+            name: "The Wave",
+            tagline: "What's hot right now.",
+            catalogArtistIDs: []
+        ), []))
 
         let streams = stationCatalogs.map { station, catalog in
             LiveStreamService(
