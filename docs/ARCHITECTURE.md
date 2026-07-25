@@ -27,10 +27,13 @@ is covered by unit tests.
                  │  LiveStreamService  ◄── renders whatever   │
                  │    │  is on air (one shared stream)        │
                  │    ├── StationScheduleSource ── what plays │
+                 │    │    ├── SupabaseScheduleSource (the    │
+                 │    │    │     live OneSync station: poll + │
+                 │    │    │     realtime nudge + REST votes) │
                  │    │    ├── LocalScheduleSource  (engine   │
                  │    │    │     on-device: offline/demo)     │
-                 │    │    └── RemoteScheduleSource (websocket│
-                 │    │          → the shared timeline)       │
+                 │    │    └── RemoteScheduleSource (generic  │
+                 │    │          self-host websocket feed)    │
                  │    │         └── StationClock (skew)       │
                  │    ├── WeightedRotationEngine  (what       │
                  │    │     plays next; never nil; complement)│
@@ -75,6 +78,32 @@ already fetched. Set a feed URL to switch a build over:
 ```
 -StationFeedURL wss://live.example.com/station
 ```
+
+## The live station (Supabase)
+
+The production timeline is the OneSync backend, and it runs today. Server
+side, `radio_advance_stations()` executes the rotation for every station and
+maintains one row per station in `radio_now_playing` (`track_id`,
+`started_at`, `duration_seconds` — a `ScheduleSlot`, verbatim). The client
+side is two small types:
+
+- **`SupabaseRadioClient`** — the REST contract: read `radio_now_playing`
+  (each response's `Date` header doubles as a `StationClock` sample, so every
+  poll re-disciplines the clock), read the catalog via
+  `radio_station_tracks` → `radio_tracks`, and POST votes to `radio_votes`
+  (anonymous inserts allowed under RLS with a `listener_key`; a per-install
+  UUID). The anon key ships in the client by design — public reads and vote
+  inserts are all it can do.
+- **`SupabaseScheduleSource`** — polling is the source of truth (one request
+  per song: it sleeps until just past the current slot's end), and a
+  deliberately *stateless* `SupabaseRealtime` subscription is the accelerant:
+  any `postgres_changes` frame just means "re-read now". A payload-shape
+  change can silence the accelerant but can never corrupt what plays.
+
+Because votes are tallied server-side, the app shows no local "up next"
+teaser on the shared station (`supportsLocalPreview == false`) — the client
+genuinely doesn't know what's next, which is exactly the non-interactive
+property the licensing design wants.
 
 ## Where each research finding lives in code
 

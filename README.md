@@ -84,26 +84,31 @@ as the phone. See [`docs/CARPLAY.md`](docs/CARPLAY.md).
 
 ## Status
 
-The rotation/voting/anti-gaming logic is real and tested, and the player can
-stream a real Navidrome library.
+The rotation/voting/anti-gaming logic is real and tested, the player can
+stream a real Navidrome library — and **the shared clock is live**.
 
-The *shared* clock is now half-built. `LiveStreamService` no longer decides
-what plays: it renders a timeline handed to it by a `StationScheduleSource`,
-and `StationClock` converts the station's clock to this device's so a phone
-that's a minute fast still joins the track at the right second. Two sources
-ship — `LocalScheduleSource`, which runs the rotation engine on-device (the
-offline and demo station, where each listener gets their own copy), and
-`RemoteScheduleSource`, a websocket client for the real thing.
+`LiveStreamService` no longer decides what plays: it renders a timeline handed
+to it by a `StationScheduleSource`, and `StationClock` converts the station's
+clock to this device's so a phone that's a minute fast still joins the track
+at the right second. Three sources ship:
 
-**What's still missing is the server.** Point a build at one — the wire format
-is documented on `RemoteScheduleSource` — and every listener is in sync:
+- **`SupabaseScheduleSource`** — *the default.* Tunes to the live OneSync
+  station: the backend's `radio_advance_stations()` rotates every station
+  server-side and publishes `radio_now_playing`; the app polls it (about one
+  request per song), disciplines its clock off each response's `Date` header,
+  and rides a Supabase Realtime nudge for instant track changes. Votes POST to
+  `radio_votes`. Every listener hears the same second.
+- **`LocalScheduleSource`** — the rotation engine on-device: offline, demo,
+  and Navidrome listening (each listener their own copy of the station).
+- **`RemoteScheduleSource`** — a generic websocket schedule feed for
+  self-hosters, wire format documented on the type
+  (`-StationFeedURL wss://…`).
 
-```bash
-# scheme ▸ Run ▸ Arguments, while the backend is being built
--StationFeedURL wss://live.example.com/station
-```
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Launch arguments: `-RadioBackend local` forces on-device rotation,
+`-RadioStationID <uuid>` picks a specific live station. What's still ahead:
+the backend serving `audio_url`s for its tracks (metadata and votes sync
+today; the audio stream arrives when those columns are filled), and listener
+counts. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Trademark / legal
 

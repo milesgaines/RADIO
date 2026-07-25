@@ -27,6 +27,9 @@ struct SettingsView: View {
                         switch services.catalogSource {
                         case .demo:
                             Text("Demo catalog")
+                        case .liveRadio:
+                            Label("Live radio", systemImage: "dot.radiowaves.left.and.right")
+                                .foregroundStyle(.pink)
                         case .navidrome(let host):
                             Label(host, systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)

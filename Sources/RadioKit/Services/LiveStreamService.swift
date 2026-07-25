@@ -148,6 +148,10 @@ public final class LiveStreamService: ObservableObject {
             castAt: now()
         )
         votes.append(vote)
+        // Forward to the server for a remote station (no-op for the local
+        // source, which tallies in-app). The optimistic bump below gives
+        // instant feedback; the server's next slot update carries the truth.
+        source.castVote(direction, on: trackID)
         recomputePreview()
         if var np = nowPlaying, np.track.id == trackID {
             np.boostScore += direction.rawValue
@@ -213,6 +217,12 @@ public final class LiveStreamService: ObservableObject {
     /// phone only — never presented as "the exact next song", which would push
     /// us toward an interactive service. It's a teaser, not a schedule.
     private func recomputePreview() {
+        // A shared station owns what's next and doesn't tell the client; only
+        // the local source, which ranks the full candidate catalog, previews.
+        guard source.supportsLocalPreview else {
+            if !upNextPreview.isEmpty { upNextPreview = [] }
+            return
+        }
         let n = now()
         let weights = netWeights()
         let history = source.recentPlays

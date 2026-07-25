@@ -69,8 +69,25 @@ public protocol StationScheduleSource: AnyObject {
 
     func updateCatalog(_ tracks: [Track])
 
+    /// Forward a vote to whatever tallies for this source. A local source
+    /// tallies in-app and ignores this; a server-backed one POSTs it. Default
+    /// no-op so only the sources that need it implement it.
+    func castVote(_ direction: VoteDirection, on trackID: UUID)
+
+    /// Whether the app should compute its own "up next" teaser. Only the local
+    /// source can — it holds the full candidate catalog the engine ranks. A
+    /// server-backed station owns what's next and, by design, doesn't tell the
+    /// client, so the teaser stays empty there rather than guessing from a
+    /// mismatched catalog.
+    var supportsLocalPreview: Bool { get }
+
     func start()
     func stop()
+}
+
+public extension StationScheduleSource {
+    func castVote(_ direction: VoteDirection, on trackID: UUID) {}
+    var supportsLocalPreview: Bool { false }
 }
 
 /// Generates the timeline on-device with the `WeightedRotationEngine`.
@@ -102,6 +119,7 @@ public final class LocalScheduleSource: StationScheduleSource {
 
     public var liveListenerCount: Int? { nil }
     public var recentPlays: [WeightedRotationEngine.PlayRecord] { history }
+    public var supportsLocalPreview: Bool { true }
 
     private let engine: WeightedRotationEngine
     private let random: () -> Double
