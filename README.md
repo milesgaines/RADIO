@@ -29,7 +29,7 @@ repo, straight from the GitHub API.
 
 | Path | Role |
 |---|---|
-| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the Navidrome/Subsonic client, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
+| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the station schedule + shared clock, the Navidrome/Subsonic client, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
 | `Sources/RadioPlusApp/` | The iOS app: scene routing, `LiveView` (the stage), `OpenSourceView`, `SettingsView` (Navidrome), `CarPlaySceneDelegate` (templates). |
 | `Tests/RadioKitTests/` | Unit tests pinning the design invariants (no dead air, boost-wins-more, superfans can't dominate, unlicensed never plays…). |
 | `project.yml` | XcodeGen spec — the `.xcodeproj` is generated, not committed. |
@@ -85,12 +85,25 @@ as the phone. See [`docs/CARPLAY.md`](docs/CARPLAY.md).
 ## Status
 
 The rotation/voting/anti-gaming logic is real and tested, and the player can
-stream a real Navidrome library. Still simulated: the *shared* clock (each
-device currently advances its own rotation locally — production needs a small
-server running the same `WeightedRotationEngine` and pushing "current track +
-start time" over a websocket so every listener is in sync). That swap is
-isolated to `LiveStreamService`; nothing else changes. See
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+stream a real Navidrome library.
+
+The *shared* clock is now half-built. `LiveStreamService` no longer decides
+what plays: it renders a timeline handed to it by a `StationScheduleSource`,
+and `StationClock` converts the station's clock to this device's so a phone
+that's a minute fast still joins the track at the right second. Two sources
+ship — `LocalScheduleSource`, which runs the rotation engine on-device (the
+offline and demo station, where each listener gets their own copy), and
+`RemoteScheduleSource`, a websocket client for the real thing.
+
+**What's still missing is the server.** Point a build at one — the wire format
+is documented on `RemoteScheduleSource` — and every listener is in sync:
+
+```bash
+# scheme ▸ Run ▸ Arguments, while the backend is being built
+-StationFeedURL wss://live.example.com/station
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Trademark / legal
 

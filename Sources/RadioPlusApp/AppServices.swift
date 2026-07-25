@@ -24,11 +24,30 @@ final class AppServices: ObservableObject {
         // any leftover plain-text copy into the keychain before the first read.
         NavidromeConfig.migrateLegacyPassword()
 
-        let stream = LiveStreamService()
+        let stream = LiveStreamService(scheduleSource: Self.configuredScheduleSource())
         self.stream = stream
         self.player = RadioPlayer(stream: stream)
         stream.start()
         reloadCatalog()
+    }
+
+    /// Point the station at a shared timeline when one is configured.
+    ///
+    /// Without this the rotation engine runs on-device: a real station, but
+    /// this listener's own copy of it. With a feed URL the same UI renders the
+    /// server's timeline instead, and every listener hears the same second.
+    /// There's no Settings field yet — set it on the scheme's launch
+    /// arguments while the backend is being built:
+    ///
+    ///     -StationFeedURL wss://live.example.com/station
+    ///
+    private static func configuredScheduleSource() -> (any StationScheduleSource)? {
+        guard
+            let raw = UserDefaults.standard.string(forKey: "StationFeedURL"),
+            let url = URL(string: raw),
+            url.scheme == "ws" || url.scheme == "wss"
+        else { return nil }
+        return RemoteScheduleSource(config: .init(url: url))
     }
 
     /// Connect to the configured Navidrome server (if any) and swap its
