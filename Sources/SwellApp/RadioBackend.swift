@@ -34,6 +34,27 @@ final class RadioBackend {
         let duration_seconds: Double
     }
 
+    struct TrackRow: Decodable {
+        let track_id: UUID
+        let title: String
+        let artist: String
+        let artist_id: UUID
+        let duration_seconds: Double
+        let audio_url: String?
+    }
+
+    /// Metadata for a track the device doesn't carry — the ALGO station's
+    /// remote catalog lives server-side.
+    func fetchTrack(_ trackID: UUID) async -> TrackRow? {
+        try? await client
+            .from("radio_tracks")
+            .select()
+            .eq("track_id", value: trackID.uuidString)
+            .single()
+            .execute()
+            .value
+    }
+
     /// Postgres timestamptz arrives with microseconds ("…08.123456+00:00"),
     /// which ISO8601DateFormatter rejects — parse the common shapes directly.
     private static let pgDateFormats: [DateFormatter] = {

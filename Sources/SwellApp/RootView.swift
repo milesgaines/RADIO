@@ -52,6 +52,7 @@ private struct PlateView: View {
     private var dialLabel: (number: String, unit: String) {
         let name = stream.station.name.lowercased()
         if name == "singles" { return ("45", "RPM") }
+        if name == "the underground" { return ("1200", "") }
         if name == "the vault" { return ("78", "RPM") }
         if accentIndex == 0 { return ("808", "") }
         return ("33\u{2153}", "RPM") // the album station

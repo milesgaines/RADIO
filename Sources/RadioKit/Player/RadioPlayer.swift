@@ -119,7 +119,9 @@ public final class RadioPlayer: ObservableObject {
 
     // MARK: - Scheduling
 
-    /// Open the track's asset and schedule it from the live edge.
+    /// Open the track's asset and schedule it from the live edge. Remote
+    /// assets (the ALGO's server catalog) download to a local cache first —
+    /// AVAudioFile only reads local files.
     private func load(_ np: NowPlaying) {
         loadedKey = LoadKey(trackID: np.track.id, startedAt: np.startedAt)
         guard let url = np.track.assetURL else {
@@ -127,6 +129,25 @@ public final class RadioPlayer: ObservableObject {
             refreshNowPlayingInfo()
             return
         }
+        if url.scheme == "https" || url.scheme == "http" {
+            let key = loadedKey
+            let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("radio-\(np.track.id.uuidString).\(url.pathExtension.isEmpty ? "wav" : url.pathExtension)")
+            Task { @MainActor [weak self] in
+                if !FileManager.default.fileExists(atPath: cache.path) {
+                    guard let (tmp, _) = try? await URLSession.shared.download(from: url) else { return }
+                    try? FileManager.default.moveItem(at: tmp, to: cache)
+                }
+                guard let self, self.loadedKey == key else { return } // stale
+                self.loadLocal(np, from: cache)
+            }
+            refreshNowPlayingInfo()
+            return
+        }
+        loadLocal(np, from: url)
+    }
+
+    private func loadLocal(_ np: NowPlaying, from url: URL) {
         do {
             let file = try AVAudioFile(forReading: url)
             reconnectIfNeeded(format: file.processingFormat)

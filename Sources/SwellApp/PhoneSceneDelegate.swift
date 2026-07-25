@@ -26,6 +26,11 @@ final class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
         if UserDefaults.standard.bool(forKey: "SwellAutoPlay") {
             AppServices.shared.player.play()
         }
+        // Automation: -SwellTuneIndex N tunes straight to a station.
+        let idx = UserDefaults.standard.integer(forKey: "SwellTuneIndex")
+        if idx > 0, idx < AppServices.shared.streams.count {
+            AppServices.shared.tune(to: AppServices.shared.streams[idx].station)
+        }
     }
 
     /// Bank listening tenure whenever the app leaves the foreground, so a

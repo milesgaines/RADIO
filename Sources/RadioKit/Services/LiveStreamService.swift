@@ -17,7 +17,7 @@ public final class LiveStreamService: ObservableObject {
     @Published public private(set) var nowPlaying: NowPlaying?
     @Published public private(set) var upNextPreview: [Track] = []
 
-    private let catalog: [Track]
+    private var catalog: [Track]
     private let engine: WeightedRotationEngine
     private let tally: VoteTally
 
@@ -143,6 +143,13 @@ public final class LiveStreamService: ObservableObject {
         guard let last = lastRemoteClockAt else { return false }
         let currentDuration = nowPlaying?.track.durationSeconds ?? 300
         return now().timeIntervalSince(last) < currentDuration + 60
+    }
+
+    /// A track this device doesn't carry locally (the ALGO station's
+    /// remote catalog) — learned from the server, playable via its URL.
+    public func upsertRemoteTrack(_ track: Track) {
+        guard !catalog.contains(where: { $0.id == track.id }) else { return }
+        catalog.append(track)
     }
 
     /// Apply the server's now-playing row. Unknown track ids (catalog

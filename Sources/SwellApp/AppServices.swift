@@ -52,12 +52,23 @@ final class AppServices: ObservableObject {
         // so rotation has room to breathe). Otherwise fall back to the
         // silent three-station MockCatalog demo.
         let realTracks = Self.loadRealAudio()
-        let stationCatalogs: [(Station, [Track])]
+        var stationCatalogs: [(Station, [Track])]
         if realTracks.count >= 3 {
             stationCatalogs = Self.realStations(from: realTracks)
         } else {
             stationCatalogs = MockCatalog.stations.map { ($0, MockCatalog.tracks(for: $0)) }
         }
+        // THE UNDERGROUND: the public station — the whole OneSync roster,
+        // hydrating over the air. The ALGORITHM (trust-weighted crowd votes,
+        // never industry numbers) decides who breaks.
+        // (id keeps its original derivation string; server rows are seeded
+        // under it.)
+        stationCatalogs.append((Station(
+            id: FolderCatalog.stableID("station:the algo"),
+            name: "The Underground",
+            tagline: "The crowd breaks records here.",
+            catalogArtistIDs: []
+        ), []))
 
         let streams = stationCatalogs.map { station, catalog in
             LiveStreamService(
@@ -92,8 +103,25 @@ final class AppServices: ObservableObject {
         }
         // The shared clock: the server says what's on air and when it
         // started; every device renders the same second.
-        backend.onRemoteClock = { [weak self] trackID, startedAt, _ in
-            self?.activeStream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
+        backend.onRemoteClock = { [weak self] trackID, startedAt, duration in
+            guard let self else { return }
+            let stream = self.activeStream
+            stream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
+            // Unknown track (the ALGO's server-side catalog): learn it,
+            // then apply the clock for real.
+            if stream.nowPlaying?.track.id != trackID {
+                Task { @MainActor in
+                    guard let row = await self.backend.fetchTrack(trackID),
+                          let raw = row.audio_url, let url = URL(string: raw) else { return }
+                    stream.upsertRemoteTrack(Track(
+                        id: row.track_id, title: row.title,
+                        artistID: row.artist_id, artistName: row.artist,
+                        durationSeconds: row.duration_seconds > 0 ? row.duration_seconds : duration,
+                        assetURL: url
+                    ))
+                    stream.applyRemoteClock(trackID: trackID, startedAt: startedAt)
+                }
+            }
         }
         backend.tune(toStationID: active.station.id.uuidString)
 
