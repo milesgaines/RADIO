@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    name: Build + test (iOS Simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          DEVICE=$(xcrun simctl list devices available -j \
+            | python3 -c "import json,sys; devs=[d['name'] for r in json.load(sys.stdin)['devices'].values() for d in r if d['name'].startswith('iPhone')]; print(devs[0])")
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+          echo "Using simulator: $DEVICE"
+
+      - name: Build app
+        run: |
+          xcodebuild build \
+            -project Swell.xcodeproj \
+            -scheme Swell \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Run RadioKit tests
+        run: |
+          xcodebuild test \
+            -project Swell.xcodeproj \
+            -scheme Swell \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.device }}" \
+            CODE_SIGNING_ALLOWED=NO
+
+  subsonic-contract:
+    name: Subsonic API contract (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Serve + verify contract
+        working-directory: tools/local-dev
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip -q install supysonic waitress lameenc mutagen
+          .venv/bin/python make_library.py
+          mkdir -p ~/.config/supysonic
+          printf '[base]\ndatabase_uri = sqlite:///%s/.config/supysonic/supysonic.db\nscanner_extensions = mp3\n' "$HOME" > ~/.config/supysonic/supysonic.conf
+          .venv/bin/supysonic-cli folder add music ~/radio-music
+          .venv/bin/supysonic-cli user add radioplus --password radio-dev-pass
+          .venv/bin/supysonic-cli folder scan music
+          .venv/bin/supysonic-server --host 127.0.0.1 --port 4747 &
+          sleep 4
+          .venv/bin/python verify_contract.py
