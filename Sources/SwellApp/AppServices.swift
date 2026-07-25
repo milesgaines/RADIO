@@ -29,10 +29,17 @@ final class AppServices: ObservableObject {
         // The same identity comes back every launch, so trust (account age +
         // listening tenure) actually accrues. `verifiedByOnboarding` stands in
         // for the sign-in/human check a real onboarding flow would do.
-        let listener = ListenerIdentity.loadOrCreate(
+        var listener = ListenerIdentity.loadOrCreate(
             store: listenerStore,
             verifiedByOnboarding: true
         )
+        // Gift build: the Program Director's voice counts in full from the
+        // first second — founding tenure, no cold start. Radio royalty does
+        // not wait in line at their own station.
+        if listener.lifetimeListeningSeconds == 0 {
+            listener.lifetimeListeningSeconds = 60 * 60 * 20
+            listenerStore.save(listener)
+        }
         self.meter = ListeningMeter(listener: listener, store: listenerStore)
 
         // Real mode: if the bundled RealAudio folder holds actual licensed

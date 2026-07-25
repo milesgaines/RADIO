@@ -41,8 +41,13 @@ private struct PlateView: View {
         services.streams.firstIndex(where: { $0 === stream }) ?? 0
     }
     private var accent: Color { CymaticPlate.accents[accentIndex % CymaticPlate.accents.count] }
-    /// Every station gets a spot on the dial. Fictional, but honest fiction.
-    private var frequency: Double { 88.1 + Double(accentIndex) * 6.4 }
+    /// Every station gets a spot on the dial — and the flagship sits at
+    /// 105.9, the frequency Damizza programmed when LA listened to one man's
+    /// ears. The dial is the dedication.
+    private var frequency: Double {
+        let dial: [Double] = [105.9, 88.1, 94.5, 101.1]
+        return dial[accentIndex % dial.count]
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -119,9 +124,20 @@ private struct PlateView: View {
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text("RADIO")
-                    .font(.custom("Gasoek One", size: 22))
-                    .foregroundStyle(bone)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("RADIO")
+                        .font(.custom("Gasoek One", size: 22))
+                        .foregroundStyle(bone)
+                    // Local, live, human — a station lives somewhere.
+                    HStack(spacing: 5) {
+                        Text("LOS ANGELES")
+                        Text("·")
+                        Text(Date.now, style: .time)
+                    }
+                    .font(.custom("Archivo Black", size: 9))
+                    .tracking(1.2)
+                    .foregroundStyle(bone.opacity(0.45))
+                }
                 Spacer()
                 HStack(spacing: 12) {
                     HStack(spacing: 6) {
@@ -213,7 +229,8 @@ private struct PlateView: View {
                                 .tracking(1.5)
                                 .foregroundStyle(bone.opacity(0.45))
                             Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "  ·  ")
-                                   + "  ·  crowd-programmed — your boost changes this",
+                                   + "  ·  crowd-programmed — your boost changes this"
+                                   + "  ·  radio didn't lose — it stopped being radio · not this one · 105.9",
                                    font: .custom("Instrument Serif", size: 16),
                                    color: bone.opacity(0.55), speed: 22)
                         }
