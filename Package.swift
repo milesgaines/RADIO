@@ -14,7 +14,8 @@ let package = Package(
     targets: [
         .target(
             name: "RadioKit",
-            path: "Sources/RadioKit"
+            path: "Sources/RadioKit",
+            resources: [.process("PrivacyInfo.xcprivacy")]
         ),
         .testTarget(
             name: "RadioKitTests",
