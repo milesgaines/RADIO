@@ -45,12 +45,16 @@ private struct PlateView: View {
         services.streams.firstIndex(where: { $0 === stream }) ?? 0
     }
     private var accent: Color { CymaticPlate.accents[accentIndex % CymaticPlate.accents.count] }
-    /// Every station gets a spot on the dial — and the flagship sits at
-    /// 105.9, the frequency Damizza programmed when LA listened to one man's
-    /// ears. The dial is the dedication.
-    private var frequency: Double {
-        let dial: [Double] = [105.9, 88.1, 94.5, 101.1]
-        return dial[accentIndex % dial.count]
+    /// No fake FM numbers — the dial speaks record culture, and every
+    /// number is literally true: 33⅓ is what an album spins at, 45 is what
+    /// a single IS, 78 is the deep-crate speed, and 808 is the machine the
+    /// whole genre is built on.
+    private var dialLabel: (number: String, unit: String) {
+        let name = stream.station.name.lowercased()
+        if name == "singles" { return ("45", "RPM") }
+        if name == "the vault" { return ("78", "RPM") }
+        if accentIndex == 0 { return ("808", "") }
+        return ("33\u{2153}", "RPM") // the album station
     }
 
     var body: some View {
@@ -254,12 +258,12 @@ private struct PlateView: View {
 
             // THE STATION IS THE STAR. The song is just what's on air.
             VStack(alignment: .leading, spacing: -6) {
-                Text(String(format: "%.1f", frequency))
+                Text(dialLabel.number)
                     .font(.custom("Gasoek One", size: 96))
                     .foregroundStyle(bone)
                     .monospacedDigit()
-                    .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.6), value: frequency)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.5), value: dialLabel.number)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -268,9 +272,11 @@ private struct PlateView: View {
                         .foregroundStyle(accent)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                    Text("FM")
-                        .font(.custom("Archivo Black", size: 13))
-                        .foregroundStyle(bone.opacity(0.5))
+                    if !dialLabel.unit.isEmpty {
+                        Text(dialLabel.unit)
+                            .font(.custom("Archivo Black", size: 13))
+                            .foregroundStyle(bone.opacity(0.5))
+                    }
                     SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
                 }
             }
