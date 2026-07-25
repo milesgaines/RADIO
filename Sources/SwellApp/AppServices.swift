@@ -18,6 +18,8 @@ final class AppServices: ObservableObject {
     let streams: [LiveStreamService]
     let player: RadioPlayer
     let meter: ListeningMeter
+    /// The station's memory: airplays witnessed, boosts wagered.
+    let airLog = AirLog()
 
     @Published private(set) var activeStream: LiveStreamService
 
@@ -106,6 +108,13 @@ final class AppServices: ObservableObject {
         activeStream = stream
         player.attach(to: stream)
         player.refreshNowPlayingInfo()
+    }
+
+    /// All of this listener's votes flow through here so every boost is
+    /// also written into the ledger as a wager on the future.
+    func castMyVote(_ direction: VoteDirection, on trackID: UUID) {
+        activeStream.vote(direction, on: trackID)
+        if direction == .boost { airLog.logBoost(trackID: trackID) }
     }
 
     /// Bank accrued tenure now (scene background, termination).

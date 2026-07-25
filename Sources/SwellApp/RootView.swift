@@ -33,6 +33,7 @@ private struct PlateView: View {
     @State private var stationFlash: String?
     @State private var showProfile = false
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
+    @State private var recordIsOn = false
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -83,6 +84,25 @@ private struct PlateView: View {
 
                 chrome(in: geo.size)
 
+                if recordIsOn, let np = stream.nowPlaying {
+                    VStack(spacing: 10) {
+                        Text("YOUR RECORD\nIS ON")
+                            .font(.custom("Gasoek One", size: 52))
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(ink)
+                        Text(np.track.title.uppercased())
+                            .font(.custom("Archivo Black", size: 14))
+                            .tracking(2)
+                            .foregroundStyle(ink.opacity(0.75))
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(accent.opacity(0.96))
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .zIndex(3)
+                    .allowsHitTesting(false)
+                }
+
                 if showWelcome {
                     WelcomeOverlay(accent: accent) {
                         UserDefaults.standard.set(true, forKey: "swell.welcomed")
@@ -104,7 +124,23 @@ private struct PlateView: View {
                 plate.configure(size: geo.size)
                 sync()
             }
-            .onChange(of: stream.nowPlaying?.track.id) { sync() }
+            .onChange(of: stream.nowPlaying?.track.id) {
+                sync()
+                // Write the airplay into the ledger; if it pays off a boost
+                // this listener wagered, deliver the oldest thrill radio has:
+                // they finally played your record.
+                if player.isPlaying, let np = stream.nowPlaying {
+                    let paidOff = services.airLog.logPlay(track: np.track, station: stream.station)
+                    if paidOff {
+                        plate.strike()
+                        Haptics.boost()
+                        withAnimation(.easeIn(duration: 0.25)) { recordIsOn = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) {
+                            withAnimation(.easeOut(duration: 0.9)) { recordIsOn = false }
+                        }
+                    }
+                }
+            }
             .onChange(of: player.isPlaying) { plate.isPlaying = player.isPlaying }
             .onChange(of: player.levels) { _, new in plate.levels = new }
             .onChange(of: stream.nowPlaying?.boostScore ?? 0) { old, new in
@@ -137,6 +173,8 @@ private struct PlateView: View {
                     .font(.custom("Archivo Black", size: 9))
                     .tracking(1.2)
                     .foregroundStyle(bone.opacity(0.45))
+                    .lineLimit(1)
+                    .fixedSize()
                 }
                 Spacer()
                 HStack(spacing: 12) {
@@ -284,7 +322,7 @@ private struct PlateView: View {
 
     private func vote(_ direction: VoteDirection) {
         guard let id = stream.nowPlaying?.track.id else { return }
-        stream.vote(direction, on: id)
+        services.castMyVote(direction, on: id)
         if direction == .boost {
             plate.strike()
             Haptics.boost()

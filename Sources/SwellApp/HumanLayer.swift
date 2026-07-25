@@ -89,7 +89,7 @@ struct ControlDeck: View {
 
             deckButton(icon: "arrow.down", label: "BURY", tint: HumanTheme.dim) {
                 if let id = stream.nowPlaying?.track.id {
-                    stream.vote(.bury, on: id)
+                    services.castMyVote(.bury, on: id)
                     Haptics.tap()
                 }
             }
@@ -117,7 +117,7 @@ struct ControlDeck: View {
 
             deckButton(icon: "arrow.up", label: "BOOST", tint: accent) {
                 if let id = stream.nowPlaying?.track.id {
-                    stream.vote(.boost, on: id)
+                    services.castMyVote(.boost, on: id)
                     Haptics.boost()
                 }
             }
@@ -291,7 +291,11 @@ struct ProfileSheet: View {
                 divider
                 statRow("LISTENER SINCE", listener.createdAt.formatted(date: .abbreviated, time: .omitted))
                 divider
-                statRow("VOTES ON \(stream.station.name.uppercased())", "\(stream.myVoteCount) this session")
+                statRow("RECORDS WITNESSED", "\(services.airLog.playCount)")
+                divider
+                statRow("BOOSTS RIDING", "\(services.airLog.wagerCount) waiting to air")
+                divider
+                statRow("TIMES THEY PLAYED YOURS", "\(services.airLog.payoffCount)")
                 divider
                 statRow("VERIFIED", listener.isVerified ? "YES" : "NOT YET")
             }
