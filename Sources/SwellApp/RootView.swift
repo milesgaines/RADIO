@@ -53,6 +53,16 @@ private struct PlateView: View {
                     .ignoresSafeArea()
                     .drawingGroup()
                 }
+                // Print texture, not screen polish: bass physically smears
+                // the color registration; static grain reads as paper tooth.
+                .layerEffect(
+                    ShaderLibrary.aberration(
+                        .float2(geo.size),
+                        .float(1.0 + player.levels.bass * 4.5)
+                    ),
+                    maxSampleOffset: CGSize(width: 8, height: 8)
+                )
+                .colorEffect(ShaderLibrary.filmGrain(.float(0.09)))
 
                 // Bottom scrim so type reads over the densest sand — a wash,
                 // not a card.
@@ -77,6 +87,10 @@ private struct PlateView: View {
             .onChange(of: stream.nowPlaying?.track.id) { sync() }
             .onChange(of: player.isPlaying) { plate.isPlaying = player.isPlaying }
             .onChange(of: player.levels) { _, new in plate.levels = new }
+            .onChange(of: stream.nowPlaying?.boostScore ?? 0) { old, new in
+                // Crowd votes land as visible pulses through the figure.
+                if new > old { plate.pulse() }
+            }
         }
     }
 
@@ -289,8 +303,25 @@ final class CymaticPlate {
         if abs(baseN - baseM) < 1 { baseM += 2 } // avoid degenerate figures
     }
 
-    func strike() { strikeUntil = Date().addingTimeInterval(0.9) }
-    func collapse() { collapseUntil = Date().addingTimeInterval(0.8) }
+    /// Your boost re-tunes the plate to a higher mode — the whole figure
+    /// visibly reorganizes into something more intricate, plus a flare.
+    func strike() {
+        strikeUntil = Date().addingTimeInterval(0.9)
+        baseN = min(9, baseN + 1)
+        if abs(baseN - baseM) < 1 { baseM = max(2, baseN - 2) }
+    }
+
+    /// Bury drops it a mode and lets the sand slump to the rim for a beat.
+    func collapse() {
+        collapseUntil = Date().addingTimeInterval(0.8)
+        baseN = max(3, baseN - 1)
+        if abs(baseN - baseM) < 1 { baseM = max(2, baseN - 2) }
+    }
+
+    /// A stranger's vote out in the crowd: brief flare, no re-tune.
+    func pulse() {
+        strikeUntil = max(strikeUntil, Date().addingTimeInterval(0.3))
+    }
 
     func stepAndDraw(in canvas: GraphicsContext, size: CGSize, date: Date) {
         if self.size != size { self.size = size }

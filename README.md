@@ -1,4 +1,4 @@
-# Swell — fan-voted live radio for iOS + CarPlay
+# RADIO — fan-voted live radio for iOS + CarPlay
 
 The first fan-programmed radio station that lives in your car. One always-on
 stream, everyone hears the same second, and the crowd shapes what plays next by
@@ -6,8 +6,12 @@ stream, everyone hears the same second, and the crowd shapes what plays next by
 catalog (OneSync) so the voting can be as interactive as we like without
 tripping the licensing wire that killed everyone who tried this before.
 
-- **Phone** — the full voting experience (boost/bury, up-next teaser, live
-  listener count).
+- **Phone** — THE PLATE: the screen is a cymatics experiment. Thousands of
+  sand grains settle into the Chladni resonance figure of whatever's playing,
+  driven by a real-time FFT of the actual audio — every song has its own
+  shape, kicks scatter it, silence freezes it. Flick up to boost (the plate
+  re-tunes to a higher mode and flares the station color), flick down to
+  bury, swipe to tune, tap to play. No cards, no lists, no buttons.
 - **CarPlay** — lean-back listening plus a single "Boost current track" action
   (button or Siri). No voting grid in the car, by Apple's rules and by design.
 
@@ -20,8 +24,10 @@ tripping the licensing wire that killed everyone who tried this before.
 
 | Path | Role |
 |---|---|
-| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the crowd simulator, listener persistence, and the `AVPlayer`/Now Playing bridge. **No UIKit dependency in the logic.** |
-| `Sources/SwellApp/` | The iOS app: `AppDelegate` scene routing, `PhoneSceneDelegate` (SwiftUI), `CarPlaySceneDelegate` (templates), `RootView` with the station dial. |
+| `Sources/RadioKit/` | The testable core: models, the vote-weighted rotation engine, anti-gaming, the live-stream runtime, the crowd simulator, listener persistence, `FolderCatalog`, and the `AVAudioEngine` player with a live FFT tap (`AudioLevels`). **No UIKit dependency in the logic.** |
+| `Sources/SwellApp/` | The iOS app: `AppDelegate` scene routing, `PhoneSceneDelegate` (SwiftUI), `CarPlaySceneDelegate` (templates), `RootView` — the cymatic plate — and `Shaders.metal` (grain + bass-driven chromatic aberration). |
+| `Resources/Fonts/` | OFL display faces (Gasoek One, Archivo Black, Instrument Serif, Climate Crisis) with their licenses. |
+| `RealAudio/` | Drop licensed masters here (gitignored) — they become the stations. |
 | `Tests/RadioKitTests/` | Unit tests pinning the design invariants (no dead air, boost-wins-more, superfans can't dominate, unlicensed never plays, identity survives relaunch…). |
 | `project.yml` | XcodeGen spec — the `.xcodeproj` is generated, not committed. |
 | `Package.swift` | SwiftPM manifest for `RadioKit` only, so `swift test` runs the core suite headlessly (CI, no simulator). |
