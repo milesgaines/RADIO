@@ -73,35 +73,41 @@ struct Ticker: View {
     }
 }
 
-/// The RADIO+ mark. The word is set; the plus is *drawn* — a hot ember
-/// glyph with a glow pass that breathes with the live bass, so the brand
-/// itself is playing the record. Never typed as text, never static.
+/// The RADI0 mark. "RADI" is set; the 0 is *drawn* — an ember ring that
+/// reads as a zero, a record, and the plate's resonance at once, with a
+/// glow pass that breathes with the live bass. Never typed, never static.
 struct RadioPlusMark: View {
     var size: CGFloat = 22
     var accent: Color
     var level: Float = 0
 
     var body: some View {
-        HStack(alignment: .top, spacing: size * 0.14) {
-            Text("RADIO")
+        HStack(alignment: .center, spacing: size * 0.10) {
+            Text("RADI")
                 .font(.custom("Gasoek One", size: size))
                 .foregroundStyle(HumanTheme.bone)
                 .fixedSize()
             Canvas { ctx, sz in
-                let t = sz.width * 0.30 // bar thickness
-                let vBar = CGRect(x: (sz.width - t) / 2, y: 0, width: t, height: sz.height)
-                let hBar = CGRect(x: 0, y: (sz.height - t) / 2, width: sz.width, height: t)
+                let lineW = sz.width * 0.26
+                let inset = lineW / 2 + 1
+                let rect = CGRect(x: inset, y: inset,
+                                  width: sz.width - 2 * inset, height: sz.height - 2 * inset)
+                let ring = Path(ellipseIn: rect)
                 var glow = ctx
                 glow.addFilter(.blur(radius: 3 + CGFloat(level) * 6))
-                glow.fill(Path(vBar), with: .color(accent.opacity(0.85)))
-                glow.fill(Path(hBar), with: .color(accent.opacity(0.85)))
-                ctx.fill(Path(vBar), with: .color(accent))
-                ctx.fill(Path(hBar), with: .color(accent))
+                glow.stroke(ring, with: .color(accent.opacity(0.85)), lineWidth: lineW)
+                ctx.stroke(ring, with: .color(accent), lineWidth: lineW)
+                // Spindle hole: it's a record.
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: sz.width / 2 - 1.2, y: sz.height / 2 - 1.2,
+                                           width: 2.4, height: 2.4)),
+                    with: .color(accent.opacity(0.9))
+                )
             }
-            .frame(width: size * 0.58, height: size * 0.58)
-            .scaleEffect(1 + CGFloat(level) * 0.28)
+            .frame(width: size * 0.82, height: size * 0.82)
+            .scaleEffect(1 + CGFloat(level) * 0.25)
             .animation(.linear(duration: 0.09), value: Int(level * 10))
-            .offset(y: size * 0.06)
+            .offset(y: size * 0.03)
         }
     }
 }

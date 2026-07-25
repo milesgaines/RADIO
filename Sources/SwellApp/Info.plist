@@ -6,8 +6,9 @@
     <string>en</string>
     <!-- Must be globally unique on the App Store (ITMS-90129 rejects the
          build otherwise — "RADIO" alone is taken). Matches the ASC listing. -->
+    <!-- RADI0 with a zero — distinct from every taken "RADIO" (ITMS-90129). -->
     <key>CFBundleDisplayName</key>
-    <string>SWELL RADIO</string>
+    <string>RADI0</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -15,7 +16,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>SWELL RADIO</string>
+    <string>RADI0</string>
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
