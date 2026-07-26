@@ -267,7 +267,7 @@ struct WelcomeOverlay: View {
                          body: "Every track vibrates its own pattern, live from the music. Watch it move on the kicks.")
                     rule(icon: "hand.draw.fill", color: accent,
                          head: "Shortcuts",
-                         body: "Flick ↑ boost · flick ↓ bury · swipe ↔ stations · tap the sand to play. Buttons below do the same.")
+                         body: "Flick ↑ boost · flick ↓ bury · swipe ↔ stations · double-tap marks the moment. The big button plays. Buttons do everything gestures do.")
                 }
 
                 Button(action: onStart) {

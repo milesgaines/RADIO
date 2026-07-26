@@ -46,6 +46,29 @@ private struct PlateView: View {
     @State private var dedicationName = ""
     @State private var momentMarked = false
 
+    // MARK: Gesture state
+    // The drag classifies itself once — vertical is a vote, horizontal is a
+    // tune — and an ambiguous diagonal is NOTHING. Misfiring (boosting when
+    // the user meant to tune, or worse, tuning away mid-song when they meant
+    // to boost) is the cardinal sin; dropping a sloppy gesture is free.
+    private enum DragAxis { case horizontal, vertical }
+    private struct DragTrack {
+        var axis: DragAxis?
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+        var armed = false // past the commit threshold — release will fire
+    }
+    /// @GestureState so a cancelled drag (incoming call, system gesture)
+    /// always snaps the plate back — plain @State would leave it shifted.
+    @GestureState private var drag = DragTrack()
+
+    /// Distance that locks the axis, and the dominance ratio required.
+    private static let lockDistance: CGFloat = 24
+    private static let dominance: CGFloat = 1.5
+    /// Release past these and the gesture fires.
+    private static let tuneCommit: CGFloat = 80
+    private static let voteCommit: CGFloat = 90
+
     /// This device is transmitting (starting, on air, or winding down).
     private var broadcasting: Bool {
         switch broadcast.state {
@@ -106,6 +129,14 @@ private struct PlateView: View {
                 // The whole plate pounds with the kick.
                 .scaleEffect(1 + CGFloat(player.levels.bass) * 0.022)
                 .animation(.linear(duration: 0.09), value: Int(player.levels.bass * 10))
+                // Tuning is PHYSICAL: the plate rides the finger during a
+                // horizontal drag (slight drag factor so it feels weighted),
+                // dims as it goes, and springs home on release or cancel.
+                // The gesture that moves nothing reads as a gesture that does
+                // nothing — this is what makes swipe-to-tune legible.
+                .offset(x: plateSlide)
+                .opacity(1 - min(0.35, abs(plateSlide) / 600))
+                .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: plateSlide)
 
                 // Scrims so type reads over the densest sand — washes,
                 // not cards. Top third and bottom half get backing.
@@ -125,15 +156,25 @@ private struct PlateView: View {
                 CrowdEmbers(count: stream.nowPlaying?.liveListeners ?? 1, accent: accent)
                     .ignoresSafeArea()
 
+                // The vote meter: a vertical pull builds the arrow toward the
+                // commit line; the detent haptic marks the point of no return.
+                // Release past it fires, release before it cancels — the
+                // gesture is inspectable mid-flight instead of a blind flick.
+                if drag.axis == .vertical {
+                    voteMeter
+                        .allowsHitTesting(false)
+                        .zIndex(1)
+                }
+
                 // The control surface lives UNDER the chrome: a gesture on
                 // the ZStack itself swallows every chrome Button (VS, the
                 // line, profile — all dead). This clear layer catches
-                // tap/flick/swipe anywhere the chrome isn't interactive;
-                // chrome buttons above it win their own touches.
+                // drags anywhere the chrome isn't interactive; chrome
+                // buttons above it win their own touches.
                 Color.clear
                     .contentShape(Rectangle())
                     .ignoresSafeArea()
-                    .gesture(gestures(in: geo.size), including: showWelcome ? .subviews : .all)
+                    .gesture(plateGestures(in: geo.size), including: showWelcome ? .subviews : .all)
 
                 chrome(in: geo.size)
 
@@ -484,19 +525,75 @@ private struct PlateView: View {
 
     // MARK: Gestures — the whole plate is the control surface
 
-    private func gestures(in size: CGSize) -> some Gesture {
-        let swipe = DragGesture(minimumDistance: 24)
+    /// The plate's live horizontal displacement (0 unless a tune drag owns
+    /// the gesture). Slight drag factor so the plate feels weighted.
+    private var plateSlide: CGFloat {
+        drag.axis == .horizontal ? drag.dx * 0.85 : 0
+    }
+
+    private func classify(dx: CGFloat, dy: CGFloat) -> DragAxis? {
+        if abs(dx) > abs(dy) * Self.dominance { return .horizontal }
+        if abs(dy) > abs(dx) * Self.dominance { return .vertical }
+        return nil
+    }
+
+    private func plateGestures(in size: CGSize) -> some Gesture {
+        let dragGesture = DragGesture(minimumDistance: 12)
+            .updating($drag) { value, state, _ in
+                let dx = value.translation.width, dy = value.translation.height
+                // Lock the axis once the drag clearly commits to one; an
+                // ambiguous diagonal stays unclassified and does nothing.
+                if state.axis == nil, max(abs(dx), abs(dy)) >= Self.lockDistance {
+                    state.axis = classify(dx: dx, dy: dy)
+                }
+                state.dx = dx
+                state.dy = dy
+                let nowArmed: Bool
+                switch state.axis {
+                case .horizontal: nowArmed = abs(dx) >= Self.tuneCommit
+                case .vertical: nowArmed = abs(dy) >= Self.voteCommit
+                case nil: nowArmed = false
+                }
+                if nowArmed != state.armed {
+                    state.armed = nowArmed
+                    // The detent that says "release fires now".
+                    if nowArmed { Haptics.detent() }
+                }
+                // @GestureState drives the live feedback (plateSlide, the vote
+                // meter) and nothing else — it resets on cancel automatically,
+                // so no drag can leave state behind.
+            }
             .onEnded { value in
                 let dx = value.translation.width, dy = value.translation.height
-                if abs(dx) > abs(dy) {
-                    tune(dx < 0 ? 1 : -1)
-                } else if dy < -30 {
-                    vote(.boost)
-                } else if dy > 30 {
-                    vote(.bury)
+                let pdx = value.predictedEndTranslation.width
+                let pdy = value.predictedEndTranslation.height
+                // Decide from THIS gesture's own numbers — no cross-frame
+                // mirror, so a prior drag (or a cancelled one) can never leak
+                // in. A drag long enough to have locked is judged by where it
+                // ACTUALLY went, so an ambiguous long diagonal classifies to
+                // nil and is dropped even if the finger flicks sideways at the
+                // very end; only a flick too short to lock is judged by its
+                // predicted trajectory.
+                let axis: DragAxis? = max(abs(dx), abs(dy)) >= Self.lockDistance
+                    ? classify(dx: dx, dy: dy)
+                    : classify(dx: pdx, dy: pdy)
+                switch axis {
+                case .horizontal:
+                    // Commit on distance, or on a genuine flick (velocity).
+                    if abs(dx) >= Self.tuneCommit || abs(pdx) >= Self.tuneCommit * 2 {
+                        tune(dx < 0 ? 1 : -1)
+                    }
+                case .vertical:
+                    if abs(dy) >= Self.voteCommit || abs(pdy) >= Self.voteCommit * 2 {
+                        vote(dy < 0 ? .boost : .bury)
+                    }
+                case nil:
+                    break // sloppy diagonal: dropped, on purpose
                 }
             }
-        // Double-tap pins the moment to your ledger; single tap is power.
+        // Double-tap pins the moment to your ledger. Single tap is
+        // deliberately NOTHING — a stray tap must never silence the radio;
+        // the deck's 68-point button is the transport.
         let mark = TapGesture(count: 2).onEnded {
             if let np = stream.nowPlaying {
                 services.airLog.markMoment(track: np.track, station: stream.station)
@@ -507,12 +604,54 @@ private struct PlateView: View {
                 }
             }
         }
-        let tap = TapGesture().onEnded {
-            player.toggle()
-            plate.isPlaying = player.isPlaying
-            Haptics.tap()
+        return dragGesture.exclusively(before: mark)
+    }
+
+    /// The commitment meter for a vertical pull: boost fills upward in the
+    /// station color, bury sinks in dimmed bone. Past the commit line the
+    /// glyph locks solid — the visual twin of the detent haptic.
+    private var voteMeter: some View {
+        let boosting = drag.dy < 0
+        let progress = min(1, abs(drag.dy) / Self.voteCommit)
+        // Both directions read in full ink-contrast: boost takes the station
+        // color, BURY stays full bone (not dimmed) so it never washes out over
+        // the brightest sand — the center of the plate that neither page scrim
+        // reaches.
+        let tint = boosting ? accent : bone
+        return ZStack {
+            // A soft vignette darkens the sand directly under the meter as the
+            // pull deepens, so the glyph reads no matter what the figure does.
+            RadialGradient(
+                colors: [ink.opacity(0.72 * Double(progress)), .clear],
+                center: .center, startRadius: 0, endRadius: 160
+            )
+            .frame(width: 340, height: 340)
+
+            VStack(spacing: 12) {
+                Image(systemName: boosting ? "arrow.up" : "arrow.down")
+                    .font(.system(size: 56, weight: .heavy))
+                    .foregroundStyle(tint)
+                    .scaleEffect(0.8 + 0.3 * progress)
+                Text(boosting ? "BOOST" : "BURY")
+                    .font(.custom("Archivo Black", size: 12))
+                    .tracking(3)
+                    .foregroundStyle(tint)
+                    .opacity(progress > 0.25 ? 1 : 0)
+            }
+            // A tight ink shadow keeps the mark legible before the vignette
+            // fully lands (and against a bright transient kick).
+            .shadow(color: ink.opacity(0.85), radius: 7)
+            .opacity(0.5 + 0.5 * Double(progress))
+            .overlay(
+                Circle()
+                    .strokeBorder(tint, lineWidth: 2)
+                    .frame(width: 140, height: 140)
+                    .opacity(drag.armed ? 1 : 0)
+            )
         }
-        return swipe.exclusively(before: mark.exclusively(before: tap))
+        .allowsHitTesting(false)
+        .animation(.linear(duration: 0.08), value: Int(progress * 20))
+        .animation(.easeOut(duration: 0.12), value: drag.armed)
     }
 
     private func vote(_ direction: VoteDirection) {
