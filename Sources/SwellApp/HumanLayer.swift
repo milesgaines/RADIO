@@ -55,7 +55,7 @@ struct Ticker: View {
         // minWidth 0 matters: without it, frame(maxWidth:) adopts the huge
         // scrolling content's width and blows up the whole layout.
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        .frame(height: 24)
+        .frame(height: 30)
         .clipped()
         .background(
             label.hidden().fixedSize().background(
@@ -175,20 +175,20 @@ struct ControlDeck: View {
                 player.toggle()
                 Haptics.tap()
             } label: {
-                VStack(spacing: 5) {
+                VStack(spacing: 7) {
                     ZStack {
                         Circle()
                             .fill(player.isPlaying ? AnyShapeStyle(HumanTheme.bone) : AnyShapeStyle(accent))
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 22, weight: .bold))
+                            .font(.system(size: 26, weight: .bold))
                             .foregroundStyle(HumanTheme.ink)
-                            .offset(x: player.isPlaying ? 0 : 1.5)
+                            .offset(x: player.isPlaying ? 0 : 2)
                     }
-                    .frame(width: 68, height: 68)
+                    .frame(width: 74, height: 74)
                     Text(player.isPlaying ? "ON AIR" : "TUNE IN")
-                        .font(.custom("Archivo Black", size: 9))
-                        .tracking(2)
-                        .foregroundStyle(HumanTheme.dim)
+                        .font(.custom("Archivo Black", size: 11))
+                        .tracking(1.6)
+                        .foregroundStyle(HumanTheme.bone.opacity(0.75))
                 }
             }
             .frame(maxWidth: .infinity)
@@ -219,16 +219,16 @@ struct ControlDeck: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 5) {
+            VStack(spacing: 7) {
                 Image(systemName: icon)
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.system(size: 23, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 54, height: 54)
-                    .background(Circle().strokeBorder(HumanTheme.bone.opacity(0.22), lineWidth: 1))
+                    .frame(width: 60, height: 60)
+                    .background(Circle().strokeBorder(HumanTheme.bone.opacity(0.28), lineWidth: 1))
                 Text(label)
-                    .font(.custom("Archivo Black", size: 8))
-                    .tracking(1.2)
-                    .foregroundStyle(HumanTheme.dim.opacity(0.8))
+                    .font(.custom("Archivo Black", size: 11))
+                    .tracking(1.4)
+                    .foregroundStyle(HumanTheme.dim)
             }
         }
     }
@@ -377,7 +377,7 @@ struct ProfileSheet: View {
             if !services.airLog.recentMoments.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("MARKED MOMENTS")
-                        .font(.custom("Archivo Black", size: 10))
+                        .font(.custom("Archivo Black", size: 11))
                         .tracking(1.5)
                         .foregroundStyle(HumanTheme.dim)
                     ForEach(Array(services.airLog.recentMoments.enumerated()), id: \.offset) { _, m in
@@ -410,17 +410,17 @@ struct ProfileSheet: View {
     private func statRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label)
-                .font(.custom("Archivo Black", size: 10))
+                .font(.custom("Archivo Black", size: 11))
                 .tracking(1.2)
                 .foregroundStyle(HumanTheme.dim)
             Spacer()
             Text(value)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(HumanTheme.bone)
                 .monospacedDigit()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        .padding(.vertical, 14)
     }
 
     private func hours(_ seconds: Double) -> String {

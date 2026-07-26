@@ -300,96 +300,89 @@ private struct PlateView: View {
         if let title = stream.nowPlaying?.track.title { plate.setFigure(for: title) }
     }
 
-    // Whisper-thin type at the edges. Everything else is sand.
-    // Craft rules: one 24pt margin, one hairline (bone 15%), three ink
-    // levels only (1.0 / 0.55 / 0.28), Gasoek for the dial number alone,
-    // Archivo Black for everything else at exactly two sizes (10 / 13).
+    // Thin type at the edges, but never below the line where it stops being
+    // tappable or readable: the top bar's actions are 42pt targets with 16pt
+    // glyphs, body labels sit at 11-12pt, and dim text holds ≥0.6 contrast.
     private var hairline: some View {
         Rectangle().fill(bone.opacity(0.15)).frame(height: 1)
             .allowsHitTesting(false)
     }
 
+    /// A top-bar action: a genuine 42-point tap target with a 16-point glyph,
+    /// so the chrome is hittable instead of a 12-point pinprick. An inner
+    /// `.font` on a Text label overrides the default (VS sets its own).
+    private func barButton<Label: View>(
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
+    ) -> some View {
+        Button(action: action) {
+            label()
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 42, height: 42)
+                .contentShape(Rectangle())
+        }
+    }
+
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Status bar: one line, baseline-locked, ruled underneath.
-            HStack(alignment: .center, spacing: 8) {
-                RadioPlusMark(size: 19, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
-                // No clock here — the status bar already tells the time, and
-                // the row must fit VS + phone + person + help on one line.
-                Text("LOS ANGELES")
-                    .font(.custom("Archivo Black", size: 10))
-                    .tracking(1.8)
-                    .foregroundStyle(bone.opacity(0.28))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    // The only door to the host key: a long-press an ordinary
-                    // listener never discovers. Full-height touch target and
-                    // the explicit gesture form — the same combination the
-                    // Ring's hold-to-vote uses (onLongPressGesture on a
-                    // 12-pt text proved unreliable).
-                    .frame(height: 32)
+            HStack(alignment: .center, spacing: 6) {
+                // The wordmark doubles as the hidden host door: a long-press no
+                // ordinary listener would try opens the key entry. (No more
+                // "LOS ANGELES" — it only ever truncated, and its room is
+                // better spent on tappable controls.)
+                RadioPlusMark(size: 22, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
+                    .frame(height: 44)
                     .contentShape(Rectangle())
                     .gesture(
                         LongPressGesture(minimumDuration: 0.9)
                             .onEnded { _ in showHostKey = true }
                     )
-                Spacer(minLength: 6)
-                HStack(spacing: 6) {
+                Spacer(minLength: 4)
+                HStack(spacing: 5) {
                     if player.isPlaying || broadcasting {
-                        Circle().fill(accent).frame(width: 5, height: 5)
+                        Circle().fill(accent).frame(width: 6, height: 6)
                     }
                     Text(broadcasting ? "ON AIR"
                          : (player.isPlaying
                             ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
                             : "OFF AIR"))
-                        .font(.custom("Archivo Black", size: 10))
-                        .tracking(1.8)
-                        .foregroundStyle(broadcasting || player.isPlaying ? bone : bone.opacity(0.55))
+                        .font(.custom("Archivo Black", size: 12))
+                        .tracking(1.4)
+                        .foregroundStyle(broadcasting || player.isPlaying ? bone : bone.opacity(0.6))
                         .monospacedDigit()
                         .lineLimit(1).fixedSize()
                 }
-                // GO LIVE: the host's transmit control. Only on a host device;
-                // ordinary listeners never see it.
+                Spacer(minLength: 4)
+                // Real tap targets: 42pt touch frames, 16pt glyphs, brighter.
+                // GO LIVE: the host's transmit control (host devices only).
                 if isHost {
-                    Button { showBroadcast = true } label: {
+                    barButton { showBroadcast = true } label: {
                         Image(systemName: "antenna.radiowaves.left.and.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(broadcasting ? accent : bone.opacity(0.55))
-                            .frame(width: 28, height: 32)
+                            .foregroundStyle(broadcasting ? accent : bone.opacity(0.72))
                     }
                 }
-                // THE RING: song battles — upload, vote, winner enters
-                // rotation. The one place "VS" appears, so it reads as a door.
-                Button { showRing = true } label: {
+                // THE RING: song battles — the one place "VS" appears.
+                barButton { showRing = true } label: {
                     Text("VS")
-                        .font(.custom("Archivo Black", size: 11))
-                        .foregroundStyle(bone.opacity(0.55))
-                        .frame(width: 28, height: 32)
+                        .font(.custom("Archivo Black", size: 15))
+                        .foregroundStyle(bone.opacity(0.72))
                 }
                 // THE LINE: hold-to-talk call-ins.
-                Button { showCallIn = true } label: {
-                    Image(systemName: "phone.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(bone.opacity(0.55))
-                        .frame(width: 28, height: 32)
+                barButton { showCallIn = true } label: {
+                    Image(systemName: "phone.fill").foregroundStyle(bone.opacity(0.72))
                 }
-                Button { showProfile = true } label: {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(bone.opacity(0.55))
-                        .frame(width: 28, height: 32)
+                barButton { showProfile = true } label: {
+                    Image(systemName: "person.fill").foregroundStyle(bone.opacity(0.72))
                 }
-                Button {
+                barButton {
                     withAnimation(.easeIn(duration: 0.3)) { showWelcome = true }
                 } label: {
-                    Image(systemName: "questionmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(bone.opacity(0.55))
-                        .frame(width: 28, height: 32)
+                    Image(systemName: "questionmark").foregroundStyle(bone.opacity(0.72))
                 }
             }
             .padding(.top, 2)
-            hairline.padding(.top, 4)
+            hairline.padding(.top, 6)
 
             // The dial. One hero, one supporting line, same left edge.
             // Display-only chrome must not eat touches — taps and flicks
@@ -431,39 +424,39 @@ private struct PlateView: View {
                 hairline
                 HStack(spacing: 10) {
                     Text("LIVE")
-                        .font(.custom("Archivo Black", size: 10))
-                        .tracking(1.8)
+                        .font(.custom("Archivo Black", size: 11))
+                        .tracking(1.6)
                         .foregroundStyle(ink)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 5)
                         .background(accent)
                     Ticker(text: player.liveTitle.isEmpty
                            ? "LIVE ON \(stream.station.name.uppercased())"
                            : player.liveTitle.uppercased(),
-                           font: .custom("Archivo Black", size: 13),
+                           font: .custom("Archivo Black", size: 15),
                            color: bone)
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 13)
                 .allowsHitTesting(false)
                 hairline
             } else if let np = stream.nowPlaying {
                 hairline
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 11) {
                     HStack(spacing: 10) {
                         Text("ON AIR")
-                            .font(.custom("Archivo Black", size: 10))
-                            .tracking(1.8)
+                            .font(.custom("Archivo Black", size: 11))
+                            .tracking(1.6)
                             .foregroundStyle(accent)
-                            .frame(width: 64, alignment: .leading)
+                            .frame(width: 62, alignment: .leading)
                         Ticker(text: "\(np.track.title) — \(np.track.artistName)"
                                + (np.track.albumTitle.map { " — \($0)" } ?? "")
                                + (services.airLog.dedication(for: np.track.id).map { " — FOR \($0.uppercased())" } ?? ""),
-                               font: .custom("Archivo Black", size: 13),
+                               font: .custom("Archivo Black", size: 15),
                                color: bone)
                         if np.boostScore != 0 {
                             Text(np.boostScore > 0 ? "▲\(np.boostScore)" : "▼\(-np.boostScore)")
-                                .font(.custom("Archivo Black", size: 13))
-                                .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.55))
+                                .font(.custom("Archivo Black", size: 15))
+                                .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.7))
                                 .monospacedDigit()
                                 .contentTransition(.numericText())
                                 .animation(.snappy, value: np.boostScore)
@@ -472,18 +465,18 @@ private struct PlateView: View {
                     if !stream.upNextPreview.isEmpty {
                         HStack(spacing: 10) {
                             Text("NEXT")
-                                .font(.custom("Archivo Black", size: 10))
-                                .tracking(1.8)
-                                .foregroundStyle(bone.opacity(0.28))
-                                .frame(width: 64, alignment: .leading)
+                                .font(.custom("Archivo Black", size: 11))
+                                .tracking(1.6)
+                                .foregroundStyle(bone.opacity(0.5))
+                                .frame(width: 62, alignment: .leading)
                             Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "   /   ")
                                    + "   /   CROWD-PROGRAMMED",
-                                   font: .custom("Archivo Black", size: 13),
-                                   color: bone.opacity(0.55), speed: 20)
+                                   font: .custom("Archivo Black", size: 14),
+                                   color: bone.opacity(0.7), speed: 20)
                         }
                     }
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 13)
                 .allowsHitTesting(false)
                 hairline
             }
