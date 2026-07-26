@@ -18,7 +18,7 @@ struct RootView: View {
     @EnvironmentObject private var player: RadioPlayer
 
     var body: some View {
-        PlateView(stream: services.activeStream)
+        PlateView(stream: services.activeStream, broadcast: services.broadcast)
             .preferredColorScheme(.dark)
             .persistentSystemOverlays(.hidden)
     }
@@ -26,17 +26,33 @@ struct RootView: View {
 
 private struct PlateView: View {
     @ObservedObject var stream: LiveStreamService
+    /// Observed so the chrome flips to ON AIR the instant a host goes live.
+    @ObservedObject var broadcast: BroadcastService
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var player: RadioPlayer
 
     @State private var plate = CymaticPlate()
     @State private var stationFlash: String?
     @State private var showProfile = false
+    @State private var showRing = false
+    @State private var showCallIn = false
+    @State private var showBroadcast = false
+    @State private var showHostKey = false
+    /// The transmit control only exists on a host device (key in Keychain).
+    @State private var isHost = BroadcastService.isHost
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
     @State private var recordIsOn = false
     @State private var dedicating = false
     @State private var dedicationName = ""
     @State private var momentMarked = false
+
+    /// This device is transmitting (starting, on air, or winding down).
+    private var broadcasting: Bool {
+        switch broadcast.state {
+        case .starting, .onAir, .stopping: return true
+        case .idle, .failed: return false
+        }
+    }
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -109,6 +125,16 @@ private struct PlateView: View {
                 CrowdEmbers(count: stream.nowPlaying?.liveListeners ?? 1, accent: accent)
                     .ignoresSafeArea()
 
+                // The control surface lives UNDER the chrome: a gesture on
+                // the ZStack itself swallows every chrome Button (VS, the
+                // line, profile — all dead). This clear layer catches
+                // tap/flick/swipe anywhere the chrome isn't interactive;
+                // chrome buttons above it win their own touches.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .gesture(gestures(in: geo.size), including: showWelcome ? .subviews : .all)
+
                 chrome(in: geo.size)
 
                 if recordIsOn, let np = stream.nowPlaying {
@@ -148,13 +174,40 @@ private struct PlateView: View {
                     .zIndex(2)
                 }
             }
-            .contentShape(Rectangle())
-            // While the welcome overlay is up, its button owns the touches —
-            // the deck's tap/flick gestures would otherwise swallow them
-            // (tap-to-play fired under the scrim instead of dismissing it).
-            .gesture(gestures(in: geo.size), including: showWelcome ? .subviews : .all)
             .sheet(isPresented: $showProfile) {
                 ProfileSheet(stream: stream, accent: accent)
+            }
+            .fullScreenCover(isPresented: $showRing) {
+                BattleView(
+                    service: services.battles,
+                    pauseRadio: { if player.isPlaying { player.pause() } },
+                    onClose: { showRing = false }
+                )
+            }
+            .sheet(isPresented: $showCallIn, onDismiss: { services.callIn.scrap() }) {
+                CallInSheet(
+                    service: services.callIn,
+                    stationID: stream.station.id.uuidString,
+                    accent: accent,
+                    pauseRadio: { if player.isPlaying { player.pause() } },
+                    onClose: { showCallIn = false }
+                )
+            }
+            .sheet(isPresented: $showBroadcast) {
+                BroadcastConsole(
+                    service: services.broadcast,
+                    stationID: stream.station.id.uuidString,
+                    stationName: stream.station.name,
+                    accent: accent,
+                    onClose: { showBroadcast = false }
+                )
+            }
+            .sheet(isPresented: $showHostKey) {
+                HostKeyEntry(
+                    accent: accent,
+                    onSaved: { isHost = BroadcastService.isHost; showHostKey = false },
+                    onClose: { showHostKey = false }
+                )
             }
             .alert("Send it out", isPresented: $dedicating) {
                 TextField("who's it for", text: $dedicationName)
@@ -212,42 +265,78 @@ private struct PlateView: View {
     // Archivo Black for everything else at exactly two sizes (10 / 13).
     private var hairline: some View {
         Rectangle().fill(bone.opacity(0.15)).frame(height: 1)
+            .allowsHitTesting(false)
     }
 
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Status bar: one line, baseline-locked, ruled underneath.
-            HStack(alignment: .center, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
                 RadioPlusMark(size: 19, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
+                // No clock here — the status bar already tells the time, and
+                // the row must fit VS + phone + person + help on one line.
                 Text("LOS ANGELES")
                     .font(.custom("Archivo Black", size: 10))
                     .tracking(1.8)
                     .foregroundStyle(bone.opacity(0.28))
-                    .lineLimit(1).fixedSize()
-                Text(Date.now, style: .time)
-                    .font(.custom("Archivo Black", size: 10))
-                    .tracking(1.8)
-                    .foregroundStyle(bone.opacity(0.28))
-                    .lineLimit(1).fixedSize()
-                Spacer(minLength: 8)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    // The only door to the host key: a long-press an ordinary
+                    // listener never discovers. Full-height touch target and
+                    // the explicit gesture form — the same combination the
+                    // Ring's hold-to-vote uses (onLongPressGesture on a
+                    // 12-pt text proved unreliable).
+                    .frame(height: 32)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.9)
+                            .onEnded { _ in showHostKey = true }
+                    )
+                Spacer(minLength: 6)
                 HStack(spacing: 6) {
-                    if player.isPlaying {
+                    if player.isPlaying || broadcasting {
                         Circle().fill(accent).frame(width: 5, height: 5)
                     }
-                    Text(player.isPlaying
-                         ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
-                         : "OFF AIR")
+                    Text(broadcasting ? "ON AIR"
+                         : (player.isPlaying
+                            ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
+                            : "OFF AIR"))
                         .font(.custom("Archivo Black", size: 10))
                         .tracking(1.8)
-                        .foregroundStyle(player.isPlaying ? bone : bone.opacity(0.55))
+                        .foregroundStyle(broadcasting || player.isPlaying ? bone : bone.opacity(0.55))
                         .monospacedDigit()
                         .lineLimit(1).fixedSize()
+                }
+                // GO LIVE: the host's transmit control. Only on a host device;
+                // ordinary listeners never see it.
+                if isHost {
+                    Button { showBroadcast = true } label: {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(broadcasting ? accent : bone.opacity(0.55))
+                            .frame(width: 28, height: 32)
+                    }
+                }
+                // THE RING: song battles — upload, vote, winner enters
+                // rotation. The one place "VS" appears, so it reads as a door.
+                Button { showRing = true } label: {
+                    Text("VS")
+                        .font(.custom("Archivo Black", size: 11))
+                        .foregroundStyle(bone.opacity(0.55))
+                        .frame(width: 28, height: 32)
+                }
+                // THE LINE: hold-to-talk call-ins.
+                Button { showCallIn = true } label: {
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(bone.opacity(0.55))
+                        .frame(width: 28, height: 32)
                 }
                 Button { showProfile = true } label: {
                     Image(systemName: "person.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(bone.opacity(0.55))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 32)
                 }
                 Button {
                     withAnimation(.easeIn(duration: 0.3)) { showWelcome = true }
@@ -255,13 +344,15 @@ private struct PlateView: View {
                     Image(systemName: "questionmark")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(bone.opacity(0.55))
-                        .frame(width: 32, height: 32)
+                        .frame(width: 28, height: 32)
                 }
             }
             .padding(.top, 2)
             hairline.padding(.top, 4)
 
             // The dial. One hero, one supporting line, same left edge.
+            // Display-only chrome must not eat touches — taps and flicks
+            // here belong to the plate's gesture layer underneath.
             Text(dialLabel.number)
                 .font(.custom("Gasoek One", size: 118))
                 .foregroundStyle(bone)
@@ -271,6 +362,7 @@ private struct PlateView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
                 .padding(.top, 10)
+                .allowsHitTesting(false)
             HStack(alignment: .center, spacing: 10) {
                 Text(stream.station.name.uppercased())
                     .font(.custom("Archivo Black", size: 16))
@@ -287,11 +379,33 @@ private struct PlateView: View {
                 SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
             }
             .padding(.top, -14)
+            .allowsHitTesting(false)
 
             Spacer()
 
             // The chyron block: ruled top and bottom, two crawls, no serif.
-            if let np = stream.nowPlaying {
+            // A live show takes the chyron over — no up-next while a human
+            // owns the air (there genuinely is no next; that's the point).
+            if player.isLive {
+                hairline
+                HStack(spacing: 10) {
+                    Text("LIVE")
+                        .font(.custom("Archivo Black", size: 10))
+                        .tracking(1.8)
+                        .foregroundStyle(ink)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(accent)
+                    Ticker(text: player.liveTitle.isEmpty
+                           ? "LIVE ON \(stream.station.name.uppercased())"
+                           : player.liveTitle.uppercased(),
+                           font: .custom("Archivo Black", size: 13),
+                           color: bone)
+                }
+                .padding(.vertical, 12)
+                .allowsHitTesting(false)
+                hairline
+            } else if let np = stream.nowPlaying {
                 hairline
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {
@@ -329,6 +443,7 @@ private struct PlateView: View {
                     }
                 }
                 .padding(.vertical, 12)
+                .allowsHitTesting(false)
                 hairline
             }
 

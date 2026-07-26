@@ -51,6 +51,11 @@
         <string>InstrumentSerif-Regular.ttf</string>
     </array>
 
+    <!-- THE LINE: hold-to-talk call-ins record from the mic. Recording only
+         ever runs while the user is physically holding the button. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Hold to talk puts your voice on the line. The director decides what airs.</string>
+
     <!-- Keep audio playing (and votes flowing) in the background / in-car. -->
     <key>UIBackgroundModes</key>
     <array>
