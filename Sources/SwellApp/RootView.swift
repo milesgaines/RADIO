@@ -144,6 +144,16 @@ private struct PlateView: View {
                 .blendMode(.multiply)
                 .allowsHitTesting(false)
 
+                // Fine analog grain over the whole field — the tooth of a
+                // printed sleeve, the hiss of tape. Kept faint so type stays
+                // crisp; it just takes the digital sheen off.
+                Color.gray
+                    .colorEffect(ShaderLibrary.filmGrain(.float(0.9)))
+                    .blendMode(.overlay)
+                    .opacity(0.07)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+
                 // The vote meter: a vertical pull builds the arrow toward the
                 // commit line; the detent haptic marks the point of no return.
                 // Release past it fires, release before it cancels — the
