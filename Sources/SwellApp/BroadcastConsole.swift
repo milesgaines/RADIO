@@ -22,6 +22,8 @@ struct BroadcastConsole: View {
     let onClose: () -> Void
 
     @State private var title = ""
+    @StateObject private var board = CallBoardService()
+    @State private var showBoard = false
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -39,13 +41,18 @@ struct BroadcastConsole: View {
             VStack(spacing: 0) {
                 header
                 hairline
-                Spacer()
-                stage
-                Spacer()
+                if showBoard {
+                    boardView
+                } else {
+                    Spacer()
+                    stage
+                    Spacer()
+                }
             }
             .padding(.horizontal, 24)
         }
         .preferredColorScheme(.dark)
+        .task { await board.refresh() }
         // On air, a stray swipe must not drop the sheet — the host ends the
         // show with the button, deliberately.
         .interactiveDismissDisabled(onAir || service.state == .starting || service.state == .stopping)
@@ -62,17 +69,18 @@ struct BroadcastConsole: View {
 
     private var header: some View {
         HStack(alignment: .center) {
-            Text("GO LIVE")
+            Text(showBoard ? "THE BOARD" : "GO LIVE")
                 .font(.custom("Archivo Black", size: 13))
                 .tracking(2.5)
                 .foregroundStyle(onAir ? ink : bone)
             Spacer()
             Button {
+                // On the board, step back to the console; otherwise close.
                 // Closing does NOT end a live show — the host may keep talking
                 // while the sheet is down; the chrome carries the LIVE banner.
-                onClose()
+                if showBoard { withAnimation { showBoard = false } } else { onClose() }
             } label: {
-                Image(systemName: "xmark")
+                Image(systemName: showBoard ? "chevron.left" : "xmark")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle((onAir ? ink : bone).opacity(0.55))
                     .frame(width: 36, height: 36)
@@ -139,6 +147,27 @@ struct BroadcastConsole: View {
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 280)
+
+            boardButton
+        }
+    }
+
+    /// Into the screener's queue — pending call-ins waiting to be aired.
+    private var boardButton: some View {
+        Button {
+            Task { await board.refresh() }
+            withAnimation { showBoard = true }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "phone.badge.waveform.fill")
+                Text(board.pending.isEmpty ? "THE BOARD" : "THE BOARD \u{00B7} \(board.pending.count) WAITING")
+            }
+            .font(.custom("Archivo Black", size: 12))
+            .tracking(1.4)
+            .foregroundStyle((onAir ? ink : bone).opacity(0.75))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 11)
+            .overlay(Rectangle().strokeBorder((onAir ? ink : bone).opacity(0.35), lineWidth: 1))
         }
     }
 
@@ -167,10 +196,12 @@ struct BroadcastConsole: View {
             meter(level: service.level)
                 .frame(width: 200, height: 30)
 
+            boardButton
+
             borderedButton("END BROADCAST", tint: ink) {
                 service.endBroadcast()
             }
-            .padding(.top, 8)
+            .padding(.top, 4)
         }
     }
 
@@ -192,6 +223,74 @@ struct BroadcastConsole: View {
             .font(.custom("Archivo Black", size: 13))
             .tracking(2)
             .foregroundStyle((onAir ? ink : bone).opacity(0.55))
+    }
+
+    // MARK: THE BOARD — the screener's queue
+
+    private var boardView: some View {
+        let fg = onAir ? ink : bone
+        return VStack(spacing: 0) {
+            if let note = board.note {
+                Text(note)
+                    .font(.custom("Archivo Black", size: 11)).tracking(1.4)
+                    .foregroundStyle(fg.opacity(0.75))
+                    .padding(.vertical, 10)
+            }
+            if board.pending.isEmpty {
+                Spacer()
+                Text("NO CALLS WAITING")
+                    .font(.custom("Archivo Black", size: 14)).tracking(2)
+                    .foregroundStyle(fg.opacity(0.55))
+                Text("HOLD-TO-TALK CALLS LAND HERE FOR YOU TO AUDITION AND AIR")
+                    .font(.custom("Archivo Black", size: 10)).tracking(1.2)
+                    .foregroundStyle(fg.opacity(0.3))
+                    .multilineTextAlignment(.center).lineSpacing(3)
+                    .frame(maxWidth: 260).padding(.top, 8)
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(board.pending) { callRow($0, fg: fg) }
+                    }
+                    .padding(.vertical, 14)
+                }
+            }
+        }
+    }
+
+    private func callRow(_ call: CallBoardService.Call, fg: Color) -> some View {
+        HStack(spacing: 12) {
+            Button { board.toggleAudition(call) } label: {
+                Image(systemName: board.auditioning == call.id ? "stop.fill" : "play.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(fg)
+                    .frame(width: 44, height: 44)
+                    .overlay(Circle().strokeBorder(fg.opacity(0.3), lineWidth: 1))
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(call.handle.isEmpty ? "ANON" : call.handle.uppercased())
+                    .font(.custom("Archivo Black", size: 14)).foregroundStyle(fg)
+                Text("\(Int(call.duration.rounded()))S ON TAPE")
+                    .font(.custom("Archivo Black", size: 10)).tracking(1)
+                    .foregroundStyle(fg.opacity(0.5)).monospacedDigit()
+            }
+            Spacer()
+            Button { Task { await board.air(call) } } label: {
+                Text("AIR").font(.custom("Archivo Black", size: 12)).tracking(1.5)
+                    .foregroundStyle(onAir ? accent : ink)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(onAir ? ink : accent)
+            }
+            Button { Task { await board.drop(call) } } label: {
+                Text("DROP").font(.custom("Archivo Black", size: 12)).tracking(1.5)
+                    .foregroundStyle(fg.opacity(0.55))
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .overlay(Rectangle().strokeBorder(fg.opacity(0.4), lineWidth: 1))
+            }
+        }
+        .padding(12)
+        .background(Rectangle().fill(fg.opacity(0.06)))
+        .disabled(board.busy)
     }
 
     // MARK: Furniture

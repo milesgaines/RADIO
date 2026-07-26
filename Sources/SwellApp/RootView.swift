@@ -310,7 +310,7 @@ private struct PlateView: View {
         Button(action: action) {
             label()
                 .font(.system(size: 16, weight: .semibold))
-                .frame(width: 42, height: 42)
+                .frame(width: 38, height: 42)
                 .contentShape(Rectangle())
         }
     }
@@ -374,7 +374,7 @@ private struct PlateView: View {
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Status bar: one line, baseline-locked, ruled underneath.
-            HStack(alignment: .center, spacing: 6) {
+            HStack(alignment: .center, spacing: 3) {
                 // The wordmark doubles as the hidden host door: a long-press no
                 // ordinary listener would try opens the key entry. (No more
                 // "LOS ANGELES" — it only ever truncated, and its room is
@@ -427,11 +427,6 @@ private struct PlateView: View {
                 }
                 barButton { showProfile = true } label: {
                     Image(systemName: "person.fill").foregroundStyle(bone.opacity(0.72))
-                }
-                barButton {
-                    withAnimation(.easeIn(duration: 0.3)) { showWelcome = true }
-                } label: {
-                    Image(systemName: "questionmark").foregroundStyle(bone.opacity(0.72))
                 }
             }
             .padding(.top, 2)
