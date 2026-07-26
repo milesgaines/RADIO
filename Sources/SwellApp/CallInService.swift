@@ -39,12 +39,17 @@ final class CallInService: NSObject, ObservableObject {
         guard case .idle = state else { return }
         #if os(iOS)
         Task { @MainActor [weak self] in
+            let asked = Date()
             let granted = await AVAudioApplication.requestRecordPermission()
             guard let self else { return }
             guard granted else {
                 self.state = .failed("MIC IS OFF — SETTINGS › RADI0")
                 return
             }
+            // If the system permission dialog actually appeared, the user's
+            // finger is long off the button — starting now would record
+            // open-ended with nothing held down. Make them hold again.
+            guard Date().timeIntervalSince(asked) < 0.5 else { return }
             self.startRecorder()
         }
         #else
@@ -175,6 +180,7 @@ final class CallInService: NSObject, ObservableObject {
                 state = .failed("SEND FAILED — TRY AGAIN")
             }
         } catch {
+            print("[THE LINE] send failed: \(error)")
             state = .failed("NO SIGNAL — TRY AGAIN")
         }
     }
