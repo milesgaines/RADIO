@@ -109,52 +109,50 @@ private struct PlateView: View {
                     .animation(.linear(duration: 0.1), value: Int(player.levels.bass * 8))
                     .ignoresSafeArea()
 
-                TimelineView(.animation(minimumInterval: 1.0 / 60)) { context in
-                    Canvas { canvas, size in
-                        plate.stepAndDraw(in: canvas, size: size, date: context.date)
-                    }
-                    .ignoresSafeArea()
-                    .drawingGroup()
-                }
-                // Print texture, not screen polish: bass physically smears
-                // the color registration; static grain reads as paper tooth.
-                .layerEffect(
-                    ShaderLibrary.aberration(
-                        .float2(geo.size),
-                        .float(1.5 + player.levels.bass * 7)
-                    ),
-                    maxSampleOffset: CGSize(width: 11, height: 11)
+                // The on-air warmth: one broad ember glow behind the sign,
+                // breathing with the low end. Bold and clean — the station is
+                // the art now, not a field of sand.
+                RadialGradient(
+                    colors: [accent.opacity(0.30 + Double(player.levels.bass) * 0.42), .clear],
+                    center: .init(x: 0.5, y: 0.36),
+                    startRadius: 6,
+                    endRadius: 300 + CGFloat(player.levels.bass) * 240
                 )
-                .colorEffect(ShaderLibrary.filmGrain(.float(0.09)))
-                // The whole plate pounds with the kick.
-                .scaleEffect(1 + CGFloat(player.levels.bass) * 0.022)
-                .animation(.linear(duration: 0.09), value: Int(player.levels.bass * 10))
-                // Tuning is PHYSICAL: the plate rides the finger during a
-                // horizontal drag (slight drag factor so it feels weighted),
-                // dims as it goes, and springs home on release or cancel.
-                // The gesture that moves nothing reads as a gesture that does
-                // nothing — this is what makes swipe-to-tune legible.
-                .offset(x: plateSlide)
-                .opacity(1 - min(0.35, abs(plateSlide) / 600))
-                .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: plateSlide)
+                .ignoresSafeArea()
+                .animation(.linear(duration: 0.1), value: Int(player.levels.bass * 12))
+                .allowsHitTesting(false)
 
-                // Scrims so type reads over the densest sand — washes,
-                // not cards. Top third and bottom half get backing.
+                // The audience, drifting up the edges — company, not a number.
+                CrowdEmbers(count: stream.nowPlaying?.liveListeners ?? 1, accent: accent)
+                    .ignoresSafeArea()
+
+                // Keep the very bottom readable for the deck and the ticker.
                 LinearGradient(
-                    colors: [.clear, ink.opacity(0.7), ink],
+                    colors: [.clear, ink.opacity(0.55)],
                     startPoint: .center, endPoint: .bottom
                 )
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
-                LinearGradient(
-                    colors: [ink.opacity(0.92), ink.opacity(0.55), .clear],
-                    startPoint: .top, endPoint: .init(x: 0.5, y: 0.45)
+
+                // A warm vignette frames the sign — the nostalgia of a lit dial
+                // in a dark room, and it pulls the eye to the center.
+                RadialGradient(
+                    colors: [.clear, Color(red: 0.02, green: 0.014, blue: 0.008).opacity(0.7)],
+                    center: .center, startRadius: 170, endRadius: 480
                 )
                 .ignoresSafeArea()
+                .blendMode(.multiply)
                 .allowsHitTesting(false)
 
-                CrowdEmbers(count: stream.nowPlaying?.liveListeners ?? 1, accent: accent)
+                // Fine analog grain over the whole field — the tooth of a
+                // printed sleeve, the hiss of tape. Kept faint so type stays
+                // crisp; it just takes the digital sheen off.
+                Color.gray
+                    .colorEffect(ShaderLibrary.filmGrain(.float(0.9)))
+                    .blendMode(.overlay)
+                    .opacity(0.07)
                     .ignoresSafeArea()
+                    .allowsHitTesting(false)
 
                 // The vote meter: a vertical pull builds the arrow toward the
                 // commit line; the detent haptic marks the point of no return.
@@ -323,6 +321,62 @@ private struct PlateView: View {
         }
     }
 
+    /// The station call as a lit marquee number: a bone face with a top-light
+    /// over a warm extruded body (stacked dark copies stepping down-right),
+    /// dropped on a soft shadow. 3D and nostalgic, modern in its restraint.
+    private func dimensionalNumber(_ text: String) -> some View {
+        let side = Color(red: 0.17, green: 0.10, blue: 0.07) // warm amber shadow
+        return ZStack {
+            ForEach(1...7, id: \.self) { i in
+                Text(text)
+                    .foregroundStyle(side)
+                    .offset(x: CGFloat(i) * 1.4, y: CGFloat(i) * 2.0)
+            }
+            Text(text)
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [bone, Color(red: 0.80, green: 0.77, blue: 0.68)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+        }
+        .font(.custom("Gasoek One", size: 132))
+        .lineLimit(1)
+        .minimumScaleFactor(0.45)
+        .shadow(color: .black.opacity(0.5), radius: 16, x: 0, y: 13)
+    }
+
+    /// A marquee rule: an ember bar with a bevel undershadow that lights up
+    /// with the bass, so the whole sign pulses like a real broadcast board.
+    private var emberRule: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(LinearGradient(colors: [accent, accent.opacity(0.72)],
+                                     startPoint: .top, endPoint: .bottom))
+                .frame(height: 3)
+            Rectangle().fill(.black.opacity(0.45)).frame(height: 1.5)
+        }
+        .shadow(color: accent.opacity(0.4 + Double(player.levels.bass) * 0.6),
+                radius: 3 + CGFloat(player.levels.bass) * 9)
+        .animation(.linear(duration: 0.1), value: Int(player.levels.bass * 12))
+    }
+
+    /// The lit end-cap on the marquee — ON AIR / LIVE as a raised ember pill.
+    private func marqueeCap(_ text: String) -> some View {
+        Text(text)
+            .font(.custom("Archivo Black", size: 13))
+            .tracking(1.4)
+            .foregroundStyle(ink)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(LinearGradient(colors: [accent, accent.opacity(0.8)],
+                                              startPoint: .top, endPoint: .bottom))
+            )
+            .shadow(color: accent.opacity(0.5), radius: 6, y: 2)
+            .fixedSize()
+    }
+
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             // Status bar: one line, baseline-locked, ruled underneath.
@@ -382,104 +436,72 @@ private struct PlateView: View {
                 }
             }
             .padding(.top, 2)
-            hairline.padding(.top, 6)
 
-            // The dial. One hero, one supporting line, same left edge.
-            // Display-only chrome must not eat touches — taps and flicks
-            // here belong to the plate's gesture layer underneath.
-            Text(dialLabel.number)
-                .font(.custom("Gasoek One", size: 118))
-                .foregroundStyle(bone)
-                .monospacedDigit()
-                .contentTransition(.opacity)
-                .animation(.easeInOut(duration: 0.5), value: dialLabel.number)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .padding(.top, 10)
-                .allowsHitTesting(false)
-            HStack(alignment: .center, spacing: 10) {
-                Text(stream.station.name.uppercased())
-                    .font(.custom("Archivo Black", size: 16))
-                    .tracking(2.5)
-                    .foregroundStyle(accent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                if !dialLabel.unit.isEmpty {
-                    Text(dialLabel.unit)
-                        .font(.custom("Archivo Black", size: 10))
-                        .tracking(1.8)
-                        .foregroundStyle(bone.opacity(0.55))
+            Spacer()
+
+            // THE SIGN — the station call, extruded like a lit marquee number,
+            // breathing with the low end and sliding under the finger on a
+            // tune. This is the hero; everything else frames it.
+            VStack(spacing: 10) {
+                dimensionalNumber(dialLabel.number)
+                    .scaleEffect(1 + CGFloat(player.levels.bass) * 0.03)
+                    .animation(.linear(duration: 0.08), value: Int(player.levels.bass * 10))
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.45), value: dialLabel.number)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(stream.station.name.uppercased())
+                        .font(.custom("Archivo Black", size: 24))
+                        .tracking(4)
+                        .foregroundStyle(accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    if !dialLabel.unit.isEmpty {
+                        Text(dialLabel.unit)
+                            .font(.custom("Archivo Black", size: 12))
+                            .tracking(2)
+                            .foregroundStyle(bone.opacity(0.55))
+                    }
                 }
-                SignalBars(level: player.isPlaying ? player.levels.rms : 0, accent: accent)
             }
-            .padding(.top, -14)
+            .frame(maxWidth: .infinity)
+            .offset(x: plateSlide)
+            .opacity(1 - min(0.4, abs(plateSlide) / 500))
+            .animation(.interactiveSpring(response: 0.28, dampingFraction: 0.86), value: plateSlide)
             .allowsHitTesting(false)
 
             Spacer()
 
-            // The chyron block: ruled top and bottom, two crawls, no serif.
-            // A live show takes the chyron over — no up-next while a human
-            // owns the air (there genuinely is no next; that's the point).
-            if player.isLive {
-                hairline
-                HStack(spacing: 10) {
-                    Text("LIVE")
-                        .font(.custom("Archivo Black", size: 11))
-                        .tracking(1.6)
-                        .foregroundStyle(ink)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(accent)
-                    Ticker(text: player.liveTitle.isEmpty
-                           ? "LIVE ON \(stream.station.name.uppercased())"
-                           : player.liveTitle.uppercased(),
-                           font: .custom("Archivo Black", size: 15),
-                           color: bone)
-                }
-                .padding(.vertical, 13)
-                .allowsHitTesting(false)
-                hairline
-            } else if let np = stream.nowPlaying {
-                hairline
-                VStack(alignment: .leading, spacing: 11) {
-                    HStack(spacing: 10) {
-                        Text("ON AIR")
-                            .font(.custom("Archivo Black", size: 11))
-                            .tracking(1.6)
-                            .foregroundStyle(accent)
-                            .frame(width: 62, alignment: .leading)
+            // THE MARQUEE — bass-lit ember rules, an ON AIR cap, and the track
+            // crawling between them like a theater sign. A live show owns it
+            // outright (no up-next while a human's on the air).
+            VStack(spacing: 0) {
+                emberRule
+                HStack(spacing: 12) {
+                    marqueeCap(player.isLive ? "LIVE" : "ON AIR")
+                    if player.isLive {
+                        Ticker(text: player.liveTitle.isEmpty
+                               ? "LIVE ON \(stream.station.name.uppercased())"
+                               : player.liveTitle.uppercased(),
+                               font: .custom("Archivo Black", size: 18), color: bone)
+                    } else if let np = stream.nowPlaying {
                         Ticker(text: "\(np.track.title) — \(np.track.artistName)"
                                + (np.track.albumTitle.map { " — \($0)" } ?? "")
                                + (services.airLog.dedication(for: np.track.id).map { " — FOR \($0.uppercased())" } ?? ""),
-                               font: .custom("Archivo Black", size: 15),
-                               color: bone)
+                               font: .custom("Archivo Black", size: 18), color: bone)
                         if np.boostScore != 0 {
                             Text(np.boostScore > 0 ? "▲\(np.boostScore)" : "▼\(-np.boostScore)")
-                                .font(.custom("Archivo Black", size: 15))
+                                .font(.custom("Archivo Black", size: 17))
                                 .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.7))
                                 .monospacedDigit()
                                 .contentTransition(.numericText())
                                 .animation(.snappy, value: np.boostScore)
                         }
                     }
-                    if !stream.upNextPreview.isEmpty {
-                        HStack(spacing: 10) {
-                            Text("NEXT")
-                                .font(.custom("Archivo Black", size: 11))
-                                .tracking(1.6)
-                                .foregroundStyle(bone.opacity(0.5))
-                                .frame(width: 62, alignment: .leading)
-                            Ticker(text: stream.upNextPreview.map(\.title).joined(separator: "   /   ")
-                                   + "   /   CROWD-PROGRAMMED",
-                                   font: .custom("Archivo Black", size: 14),
-                                   color: bone.opacity(0.7), speed: 20)
-                        }
-                    }
                 }
-                .padding(.vertical, 13)
-                .allowsHitTesting(false)
-                hairline
+                .padding(.vertical, 14)
+                emberRule
             }
+            .allowsHitTesting(false)
 
             ControlDeck(stream: stream, accent: accent, onTune: { direction in
                 tune(direction)
@@ -487,7 +509,7 @@ private struct PlateView: View {
                 dedicating = true
             })
             .frame(maxWidth: .infinity)
-            .padding(.top, 14)
+            .padding(.top, 20)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 24)
