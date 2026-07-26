@@ -175,22 +175,35 @@ struct ControlDeck: View {
                 player.toggle()
                 Haptics.tap()
             } label: {
-                VStack(spacing: 7) {
+                VStack(spacing: 8) {
                     ZStack {
-                        Circle()
-                            .fill(player.isPlaying ? AnyShapeStyle(HumanTheme.bone) : AnyShapeStyle(accent))
+                        // A raised orb: lit from the upper-left, dropped on its
+                        // own glow + shadow so it reads as a physical button.
+                        Circle().fill(
+                            RadialGradient(
+                                colors: player.isPlaying
+                                    ? [HumanTheme.bone, Color(red: 0.78, green: 0.75, blue: 0.66)]
+                                    : [Color(red: 1.0, green: 0.60, blue: 0.40), accent],
+                                center: .init(x: 0.34, y: 0.30), startRadius: 3, endRadius: 66)
+                        )
+                        Ellipse().fill(.white.opacity(0.32))
+                            .frame(width: 34, height: 18).blur(radius: 7)
+                            .offset(x: -9, y: -19)
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 26, weight: .bold))
+                            .font(.system(size: 29, weight: .bold))
                             .foregroundStyle(HumanTheme.ink)
                             .offset(x: player.isPlaying ? 0 : 2)
                     }
-                    .frame(width: 74, height: 74)
+                    .frame(width: 80, height: 80)
+                    .shadow(color: (player.isPlaying ? HumanTheme.bone : accent).opacity(0.45), radius: 15, y: 5)
+                    .shadow(color: .black.opacity(0.5), radius: 8, y: 8)
                     Text(player.isPlaying ? "ON AIR" : "TUNE IN")
                         .font(.custom("Archivo Black", size: 11))
                         .tracking(1.6)
-                        .foregroundStyle(HumanTheme.bone.opacity(0.75))
+                        .foregroundStyle(HumanTheme.bone.opacity(0.8))
                 }
             }
+            .buttonStyle(PressKey())
             .frame(maxWidth: .infinity)
 
             // Tap: boost. Hold: send it out to someone — radio's oldest ritual.
@@ -219,18 +232,46 @@ struct ControlDeck: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 23, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 60, height: 60)
-                    .background(Circle().strokeBorder(HumanTheme.bone.opacity(0.28), lineWidth: 1))
+                    .frame(width: 62, height: 62)
+                    .background(DeckKey.raised)
                 Text(label)
                     .font(.custom("Archivo Black", size: 11))
                     .tracking(1.4)
                     .foregroundStyle(HumanTheme.dim)
             }
         }
+        .buttonStyle(PressKey())
+    }
+}
+
+/// A raised physical key: warm dark face lit from above, hairline rim, a soft
+/// top specular, dropped on a shadow. Vintage hi-fi button, modern and clean.
+enum DeckKey {
+    static var raised: some View {
+        Circle()
+            .fill(LinearGradient(
+                colors: [Color(red: 0.17, green: 0.16, blue: 0.16),
+                         Color(red: 0.07, green: 0.065, blue: 0.07)],
+                startPoint: .top, endPoint: .bottom))
+            .overlay(Circle().strokeBorder(HumanTheme.bone.opacity(0.16), lineWidth: 1))
+            .overlay(
+                Ellipse().fill(HumanTheme.bone.opacity(0.14))
+                    .frame(width: 32, height: 15).blur(radius: 6).offset(y: -15)
+            )
+            .shadow(color: .black.opacity(0.55), radius: 7, x: 0, y: 5)
+    }
+}
+
+/// Press feedback: keys dip and settle, so the controls feel physical.
+struct PressKey: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
