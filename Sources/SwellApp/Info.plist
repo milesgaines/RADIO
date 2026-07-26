@@ -56,6 +56,13 @@
     <key>NSMicrophoneUsageDescription</key>
     <string>Hold to talk puts your voice on the line. The director decides what airs.</string>
 
+    <!-- Required by ingest (ITMS-90683): the GO LIVE broadcast engine links
+         AVCaptureSession, and Apple's analyzer demands the camera string for
+         any capture-framework reference. The app never captures video and
+         never requests camera access — iOS will never show this prompt. -->
+    <key>NSCameraUsageDescription</key>
+    <string>RADI0 never takes photos or video. The broadcast engine uses Apple's capture framework for the microphone only.</string>
+
     <!-- Keep audio playing (and votes flowing) in the background / in-car. -->
     <key>UIBackgroundModes</key>
     <array>
