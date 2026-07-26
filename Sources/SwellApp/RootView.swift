@@ -18,7 +18,7 @@ struct RootView: View {
     @EnvironmentObject private var player: RadioPlayer
 
     var body: some View {
-        PlateView(stream: services.activeStream)
+        PlateView(stream: services.activeStream, broadcast: services.broadcast)
             .preferredColorScheme(.dark)
             .persistentSystemOverlays(.hidden)
     }
@@ -26,6 +26,8 @@ struct RootView: View {
 
 private struct PlateView: View {
     @ObservedObject var stream: LiveStreamService
+    /// Observed so the chrome flips to ON AIR the instant a host goes live.
+    @ObservedObject var broadcast: BroadcastService
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var player: RadioPlayer
 
@@ -34,11 +36,23 @@ private struct PlateView: View {
     @State private var showProfile = false
     @State private var showRing = false
     @State private var showCallIn = false
+    @State private var showBroadcast = false
+    @State private var showHostKey = false
+    /// The transmit control only exists on a host device (key in Keychain).
+    @State private var isHost = BroadcastService.isHost
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
     @State private var recordIsOn = false
     @State private var dedicating = false
     @State private var dedicationName = ""
     @State private var momentMarked = false
+
+    /// This device is transmitting (starting, on air, or winding down).
+    private var broadcasting: Bool {
+        switch broadcast.state {
+        case .starting, .onAir, .stopping: return true
+        case .idle, .failed: return false
+        }
+    }
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -179,6 +193,22 @@ private struct PlateView: View {
                     onClose: { showCallIn = false }
                 )
             }
+            .sheet(isPresented: $showBroadcast) {
+                BroadcastConsole(
+                    service: services.broadcast,
+                    stationID: stream.station.id.uuidString,
+                    stationName: stream.station.name,
+                    accent: accent,
+                    onClose: { showBroadcast = false }
+                )
+            }
+            .sheet(isPresented: $showHostKey) {
+                HostKeyEntry(
+                    accent: accent,
+                    onSaved: { isHost = BroadcastService.isHost; showHostKey = false },
+                    onClose: { showHostKey = false }
+                )
+            }
             .alert("Send it out", isPresented: $dedicating) {
                 TextField("who's it for", text: $dedicationName)
                 Button("SEND IT") {
@@ -251,19 +281,41 @@ private struct PlateView: View {
                     .foregroundStyle(bone.opacity(0.28))
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
+                    // The only door to the host key: a long-press an ordinary
+                    // listener never discovers. Full-height touch target and
+                    // the explicit gesture form — the same combination the
+                    // Ring's hold-to-vote uses (onLongPressGesture on a
+                    // 12-pt text proved unreliable).
+                    .frame(height: 32)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        LongPressGesture(minimumDuration: 0.9)
+                            .onEnded { _ in showHostKey = true }
+                    )
                 Spacer(minLength: 6)
                 HStack(spacing: 6) {
-                    if player.isPlaying {
+                    if player.isPlaying || broadcasting {
                         Circle().fill(accent).frame(width: 5, height: 5)
                     }
-                    Text(player.isPlaying
-                         ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
-                         : "OFF AIR")
+                    Text(broadcasting ? "ON AIR"
+                         : (player.isPlaying
+                            ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
+                            : "OFF AIR"))
                         .font(.custom("Archivo Black", size: 10))
                         .tracking(1.8)
-                        .foregroundStyle(player.isPlaying ? bone : bone.opacity(0.55))
+                        .foregroundStyle(broadcasting || player.isPlaying ? bone : bone.opacity(0.55))
                         .monospacedDigit()
                         .lineLimit(1).fixedSize()
+                }
+                // GO LIVE: the host's transmit control. Only on a host device;
+                // ordinary listeners never see it.
+                if isHost {
+                    Button { showBroadcast = true } label: {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(broadcasting ? accent : bone.opacity(0.55))
+                            .frame(width: 28, height: 32)
+                    }
                 }
                 // THE RING: song battles — upload, vote, winner enters
                 // rotation. The one place "VS" appears, so it reads as a door.

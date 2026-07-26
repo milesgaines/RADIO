@@ -24,6 +24,9 @@ final class AppServices: ObservableObject {
     let battles: BattleService
     /// THE LINE — call-ins (hold to talk, moderated, aired between songs).
     let callIn: CallInService
+    /// GO LIVE — a host takes the air (mic → HLS on the phone). Dormant unless
+    /// a host key sits in the Keychain.
+    let broadcast = BroadcastService()
     /// The real numbers: presence + votes over Supabase realtime.
     private let backend: RadioBackend
 
@@ -155,6 +158,15 @@ final class AppServices: ObservableObject {
                   self.activeStream.station.id.uuidString
                       .caseInsensitiveCompare(stationID) == .orderedSame
             else { return }
+            // The host's OWN broadcast must never loop back into their speaker
+            // (mic → HLS → mic feedback, plus ~15 s of latency). When this
+            // device is the one on air for this station, ignore the flip — the
+            // console is the host's monitor.
+            if self.broadcast.isBroadcasting,
+               let broadcasting = self.broadcast.stationID,
+               broadcasting.caseInsensitiveCompare(stationID) == .orderedSame {
+                return
+            }
             if live, !hls.isEmpty, let url = URL(string: hls) {
                 self.player.goLive(url: url, title: title.isEmpty ? "LIVE" : title)
             } else if self.player.isLive {
@@ -162,6 +174,15 @@ final class AppServices: ObservableObject {
             }
         }
         backend.tune(toStationID: active.station.id.uuidString)
+
+        // The broadcaster borrows the audio output: pause the radio when a
+        // host goes live, resume it when the show ends.
+        broadcast.attach(stationID: active.station.id.uuidString)
+        broadcast.pauseRadio = { [weak self] in
+            guard let self, self.player.isPlaying else { return }
+            self.player.pause()
+        }
+        broadcast.resumeRadio = { [weak self] in self?.player.play() }
 
         // Listening tenure accrues while playback runs...
         player.$isPlaying
