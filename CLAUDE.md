@@ -78,6 +78,40 @@ rotation (`WeightedRotationEngine`) is the offline fallback only.
 (`Sources/SwellApp/RadioBackend.swift`, using `supabase-swift` realtime for
 presence, votes, and now-playing) feeding `LiveStreamService.applyRemoteClock`.
 
+**The streaming world** (2026-07, same Supabase project) extends the seam:
+
+- **Playback streams.** `RadioPlayer` plays remote tracks through AVPlayer
+  progressively (tune-in ≈1s, no full-file download) with an
+  `MTAudioProcessingTap` (`StreamTapContext`) feeding the same FFT levels as
+  local playback; a 5s drift corrector snaps back to the shared second.
+  Local bundled files still go through `AVAudioEngine`.
+- **THE RING (battles).** `radio_battle_entries`/`radio_battles`/
+  `radio_battle_votes`; entries upload via the `battle-submit` Edge Function
+  (caps: 20MB, 3/day/device); votes via `radio_cast_battle_vote()` (one per
+  listener per battle, switching allowed); `radio_battle_director()` on
+  pg_cron (30s) pairs, settles, and inserts the winner into `radio_tracks` +
+  1200 THE UNDERGROUND's `radio_station_tracks`, then queues it to air. A
+  battle vote decides what ENTERS ROTATION, never what plays next — the
+  Arista line holds. Client: `BattleService` + `BattleView` ("VS" in the HUD).
+- **THE LINE (call-ins).** `radio_callins` via `callin-submit` (4MB, 45s,
+  5/day); pending until `radio_approve_callin(id, key)` (key in the
+  `radio_admin` table — never ships in a client) turns it into a
+  kind='callin' track and queues it. Client: `CallInService` + `CallInSheet`
+  (phone icon in the HUD; mic permission in Info.plist).
+- **The director's order** in `radio_advance_stations()`: live-show halt →
+  `radio_air_queue` (one-shots cut the line) → drop cadence
+  (`radio_drops` every `drop_every_n` spins) → crowd pick (`kind='song'`
+  only — queue/drop rows are never in `radio_station_tracks`).
+- **GO LIVE.** `radio_live` (realtime-published) flips a station to a human:
+  the director halts, clients swap to HLS via `RadioPlayer.goLive` (HLS
+  vends no tap buffers, so the plate breathes a synthetic pulse). Flip with
+  `radio_set_live(station, live, title, hls_url, key)`. Broadcaster tooling
+  (mic → HLS ingest) is NOT built yet — the listener side is.
+- **Web player.** `web/listen.html` — supabase-js, same shared second, same
+  presence rooms as the app. Supabase's shared domain force-sandboxes HTML
+  (functions AND storage serve it as text/plain), so host it elsewhere
+  (e.g. githack/jsDelivr off this public repo, or any static host).
+
 **The dormant RadioPlus line** (kept in `RadioKit`, compiled but not wired
 into the app) models the same seam as a `StationScheduleSource` protocol
 (`Services/StationSchedule.swift`) handing back `ScheduleSlot`s in *station

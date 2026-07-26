@@ -32,6 +32,8 @@ private struct PlateView: View {
     @State private var plate = CymaticPlate()
     @State private var stationFlash: String?
     @State private var showProfile = false
+    @State private var showRing = false
+    @State private var showCallIn = false
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
     @State private var recordIsOn = false
     @State private var dedicating = false
@@ -156,6 +158,22 @@ private struct PlateView: View {
             .sheet(isPresented: $showProfile) {
                 ProfileSheet(stream: stream, accent: accent)
             }
+            .fullScreenCover(isPresented: $showRing) {
+                BattleView(
+                    service: services.battles,
+                    pauseRadio: { if player.isPlaying { player.pause() } },
+                    onClose: { showRing = false }
+                )
+            }
+            .sheet(isPresented: $showCallIn, onDismiss: { services.callIn.scrap() }) {
+                CallInSheet(
+                    service: services.callIn,
+                    stationID: stream.station.id.uuidString,
+                    accent: accent,
+                    pauseRadio: { if player.isPlaying { player.pause() } },
+                    onClose: { showCallIn = false }
+                )
+            }
             .alert("Send it out", isPresented: $dedicating) {
                 TextField("who's it for", text: $dedicationName)
                 Button("SEND IT") {
@@ -243,6 +261,21 @@ private struct PlateView: View {
                         .monospacedDigit()
                         .lineLimit(1).fixedSize()
                 }
+                // THE RING: song battles — upload, vote, winner enters
+                // rotation. The one place "VS" appears, so it reads as a door.
+                Button { showRing = true } label: {
+                    Text("VS")
+                        .font(.custom("Archivo Black", size: 11))
+                        .foregroundStyle(bone.opacity(0.55))
+                        .frame(width: 32, height: 32)
+                }
+                // THE LINE: hold-to-talk call-ins.
+                Button { showCallIn = true } label: {
+                    Image(systemName: "phone.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(bone.opacity(0.55))
+                        .frame(width: 32, height: 32)
+                }
                 Button { showProfile = true } label: {
                     Image(systemName: "person.fill")
                         .font(.system(size: 12, weight: .semibold))
@@ -291,7 +324,27 @@ private struct PlateView: View {
             Spacer()
 
             // The chyron block: ruled top and bottom, two crawls, no serif.
-            if let np = stream.nowPlaying {
+            // A live show takes the chyron over — no up-next while a human
+            // owns the air (there genuinely is no next; that's the point).
+            if player.isLive {
+                hairline
+                HStack(spacing: 10) {
+                    Text("LIVE")
+                        .font(.custom("Archivo Black", size: 10))
+                        .tracking(1.8)
+                        .foregroundStyle(ink)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(accent)
+                    Ticker(text: player.liveTitle.isEmpty
+                           ? "LIVE ON \(stream.station.name.uppercased())"
+                           : player.liveTitle.uppercased(),
+                           font: .custom("Archivo Black", size: 13),
+                           color: bone)
+                }
+                .padding(.vertical, 12)
+                hairline
+            } else if let np = stream.nowPlaying {
                 hairline
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 10) {

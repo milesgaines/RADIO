@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADI0 — LISTEN LIVE</title>
+<meta name="description" content="RADI0 live web player. One stream, fan-voted rotation. Everyone hears the same second.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Gasoek+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:   #0a0a0c;
+    --bone:  #f1ecdf;
+    --ember: #ff5c2e;
+    --hair:  rgba(241, 236, 223, 0.22);
+    --dim:   rgba(241, 236, 223, 0.45);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink);
+    color: var(--bone);
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100svh;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+  /* ---- wordmark: RADI + the ring-zero (the record) ---- */
+  header { display: flex; align-items: center; padding: 1.25rem 1.5rem; }
+  .wordmark {
+    display: flex; align-items: center;
+    font-size: 1.3rem; letter-spacing: 0.08em; line-height: 1;
+    user-select: none;
+  }
+  .wordmark svg { width: 1em; height: 1em; display: block; margin-left: 0.1em; }
+
+  main {
+    flex: 1;
+    width: 100%;
+    max-width: 56rem;
+    margin: 0 auto;
+    padding: 0 1.25rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(1.1rem, 3vh, 1.9rem);
+    text-align: center;
+  }
+
+  /* ---- station tabs ---- */
+  .tabs { display: flex; border: 1px solid var(--hair); position: relative; z-index: 1; }
+  .tab {
+    padding: 0.7rem 1.1rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.28em;
+    color: var(--dim);
+    white-space: nowrap;
+    transition: color 0.15s;
+  }
+  .tab + .tab { border-left: 1px solid var(--hair); }
+  .tab[aria-selected="true"] { color: var(--ember); }
+  .tab:hover { color: var(--bone); }
+  .tab[aria-selected="true"]:hover { color: var(--ember); }
+
+  /* ---- the dial ---- */
+  /* Display-only: Gasoek One's ascent overflows the 0.9 line box, so the
+     dial's hit-testable inline box reaches up over the tabs. Without this,
+     the glyphs silently eat the tabs' clicks. */
+  .dial-block { pointer-events: none; user-select: none; }
+  .dial {
+    font-family: 'Gasoek One', sans-serif;
+    font-size: clamp(6rem, 30vw, 16rem);
+    line-height: 0.9;
+    letter-spacing: 0.02em;
+  }
+  .station-name {
+    margin-top: 0.9rem;
+    font-size: clamp(0.8rem, 3.2vw, 1.4rem);
+    letter-spacing: 0.55em;
+    text-indent: 0.55em; /* recenters letterspaced caps */
+  }
+
+  /* ---- ON AIR ticker ---- */
+  .onair-row {
+    display: flex; align-items: center; gap: 1rem;
+    width: 100%; max-width: 34rem;
+    border-top: 1px solid var(--hair);
+    border-bottom: 1px solid var(--hair);
+    padding: 0.8rem 0;
+  }
+  .onair-label {
+    color: var(--ember);
+    font-size: 0.62rem; letter-spacing: 0.35em;
+    white-space: nowrap; flex: none;
+  }
+  .ticker { overflow: hidden; flex: 1; min-width: 0; }
+  .ticker-track {
+    display: inline-flex; white-space: nowrap;
+    animation: marquee 18s linear infinite;
+    will-change: transform;
+  }
+  /* two identical spans + translateX(-50%) = seamless loop */
+  .ticker-track span {
+    font-size: 0.68rem; letter-spacing: 0.22em;
+    padding-right: 3.5rem; opacity: 0.85;
+  }
+  @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+  /* ---- LIVE count ---- */
+  .live {
+    display: flex; align-items: center; gap: 0.55rem;
+    font-size: 0.6rem; letter-spacing: 0.3em; text-indent: 0.3em;
+    color: rgba(241, 236, 223, 0.7);
+  }
+  .live-dot {
+    width: 0.45rem; height: 0.45rem; border-radius: 50%;
+    background: var(--ember); flex: none;
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* ---- levels: 24 bars, fake on web, honest about it ---- */
+  .eq { display: flex; align-items: flex-end; gap: 4px; height: 46px; }
+  .eq span {
+    width: 3px; height: 100%; flex: none;
+    background: var(--ember);
+    transform-origin: bottom;
+    transform: scaleY(0.06);
+  }
+  .eq.on span { animation: dance var(--d, 0.9s) ease-in-out var(--dl, 0s) infinite alternate; }
+  @keyframes dance { from { transform: scaleY(0.08); } to { transform: scaleY(1); } }
+
+  /* ---- transport ---- */
+  .play {
+    border: 1px solid var(--hair);
+    padding: 1.05rem 3.6rem;
+    font-size: 0.8rem; letter-spacing: 0.45em; text-indent: 0.45em;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .play:hover { border-color: var(--bone); }
+  .play.playing { border-color: var(--ember); color: var(--ember); }
+
+  .status {
+    font-size: 0.55rem; letter-spacing: 0.3em; text-indent: 0.3em;
+    color: rgba(241, 236, 223, 0.4);
+    min-height: 1em;
+  }
+
+  footer {
+    display: flex; flex-direction: column; align-items: center; gap: 0.9rem;
+    padding: 2rem 1.5rem 2.5rem;
+    text-align: center;
+  }
+  .same-second { font-size: 0.6rem; letter-spacing: 0.3em; color: rgba(241, 236, 223, 0.28); }
+  .app-link {
+    font-size: 0.6rem; letter-spacing: 0.3em;
+    color: var(--ember); text-decoration: none;
+    border-bottom: 1px solid rgba(255, 92, 46, 0.4);
+    padding-bottom: 0.2rem;
+  }
+  .app-link:hover { border-bottom-color: var(--ember); }
+
+  @media (max-width: 420px) {
+    .tab { padding: 0.65rem 0.7rem; font-size: 0.52rem; letter-spacing: 0.2em; }
+    .play { padding: 0.95rem 2.6rem; }
+    .onair-row { gap: 0.7rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wordmark" aria-label="RADI0">
+    RADI<!-- the zero is a record: a ring with a hole -->
+    <svg viewBox="0 0 100 100" role="img" aria-label="0" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="34" fill="none" stroke="#ff5c2e" stroke-width="28"/>
+    </svg>
+  </div>
+</header>
+
+<main>
+  <div class="tabs" role="tablist" aria-label="STATIONS">
+    <button class="tab" role="tab" id="tab-1200" aria-selected="true"
+            data-station="ba13d3b9-a9c7-807d-b73b-065938f474b5">1200 THE UNDERGROUND</button>
+    <button class="tab" role="tab" id="tab-247" aria-selected="false"
+            data-station="081d9153-27b2-890b-859b-2b95db1a08b3">247 THE WAVE</button>
+  </div>
+
+  <div class="dial-block">
+    <div class="dial" id="dial">1200</div>
+    <div class="station-name" id="stationName">THE UNDERGROUND</div>
+  </div>
+
+  <div class="onair-row">
+    <span class="onair-label">ON AIR</span>
+    <div class="ticker">
+      <div class="ticker-track">
+        <span id="tick1">NO SIGNAL</span><span id="tick2" aria-hidden="true">NO SIGNAL</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="live"><span class="live-dot"></span><span id="liveCount">LIVE 0</span></div>
+
+  <div class="eq" id="eq" aria-hidden="true"></div>
+
+  <button class="play" id="playBtn" aria-pressed="false">PLAY</button>
+  <div class="status" id="status" role="status">STANDBY</div>
+</main>
+
+<footer>
+  <div class="same-second">EVERYONE HEARS THE SAME SECOND.</div>
+  <a class="app-link" href="#">GET THE APP — TESTFLIGHT</a>
+</footer>
+
+<audio id="audio" preload="auto"></audio>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Publishable key — public by design. RLS is the boundary: anonymous clients
+// can only read the broadcast tables. The server decides rotation; this page
+// just renders the station.
+const SUPABASE_URL = 'https://tgkgdquivdoquxamtgcr.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_JYYXKdhcGnEP5curdG_pLg_XVcy9-ii';
+
+const STATIONS = [
+  { id: 'ba13d3b9-a9c7-807d-b73b-065938f474b5', dial: '1200', name: 'THE UNDERGROUND' },
+  { id: '081d9153-27b2-890b-859b-2b95db1a08b3', dial: '247',  name: 'THE WAVE' },
+];
+
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+
+const listenerId = 'web-' + Math.random().toString(36).slice(2, 10);
+
+let active = STATIONS[0];
+let playing = false;
+let loadToken = 0;        // bumps on every load/stop/switch; stale async work checks it and bails
+let lastLoadedKey = null; // which now_playing row audio.src currently holds
+let presenceChannel = null;
+const nowPlaying = new Map(); // station_id -> latest radio_now_playing row
+
+// ---- helpers -------------------------------------------------------------
+
+// Postgres timestamptz arrives in several shapes ('...+00', '...+00:00',
+// microsecond fractions, space separators). Normalize to what Date.parse
+// accepts everywhere, and treat bare timestamps as UTC — station time is UTC.
+function parseTs(s) {
+  if (!s) return NaN;
+  let t = String(s).trim().replace(' ', 'T');
+  t = t.replace(/(\.\d{3})\d+/, '$1');            // JS dates carry ms precision only
+  t = t.replace(/([+-]\d{2})$/, '$1:00');         // '+00' -> '+00:00'
+  if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(t)) t += 'Z';
+  return Date.parse(t);
+}
+
+function rowKey(row) { return `${row.station_id}|${row.track_id}|${row.started_at}`; }
+function setStatus(msg) { $('status').textContent = msg; }
+
+// ---- render --------------------------------------------------------------
+
+function renderStation() {
+  $('dial').textContent = active.dial;
+  $('stationName').textContent = active.name;
+  document.querySelectorAll('.tab').forEach((t) => {
+    t.setAttribute('aria-selected', String(t.dataset.station === active.id));
+  });
+  renderTicker();
+}
+
+function renderTicker() {
+  const np = nowPlaying.get(active.id);
+  const text = np
+    ? `${(np.title || 'UNTITLED').toUpperCase()} — ${(np.artist || 'UNKNOWN').toUpperCase()}`
+    : 'NO SIGNAL';
+  if ($('tick1').textContent !== text) {
+    $('tick1').textContent = text;
+    $('tick2').textContent = text;
+  }
+}
+
+function renderPlayState() {
+  const btn = $('playBtn');
+  btn.textContent = playing ? 'STOP' : 'PLAY';
+  btn.classList.toggle('playing', playing);
+  btn.setAttribute('aria-pressed', String(playing));
+  $('eq').classList.toggle('on', playing);
+}
+
+// 24 bars, each with its own tempo and a negative delay so they never start
+// in phase. Fake levels — the web has no tap on the decoder, and that's fine.
+(function buildEq() {
+  const eq = $('eq');
+  for (let i = 0; i < 24; i++) {
+    const bar = document.createElement('span');
+    bar.style.setProperty('--d', (0.55 + Math.random() * 0.75).toFixed(2) + 's');
+    bar.style.setProperty('--dl', (-Math.random() * 1.4).toFixed(2) + 's');
+    eq.appendChild(bar);
+  }
+})();
+
+// ---- now playing (server decides; we just follow) ------------------------
+
+function applyRow(row) {
+  if (!row || !row.station_id) return;
+  const prev = nowPlaying.get(row.station_id);
+  nowPlaying.set(row.station_id, row);
+  if (row.station_id !== active.id) return;
+  renderTicker();
+  const changed = !prev || prev.track_id !== row.track_id || prev.started_at !== row.started_at;
+  if (playing && changed && rowKey(row) !== lastLoadedKey) syncPlayback();
+}
+
+async function refresh() {
+  const { data, error } = await sb
+    .from('radio_now_playing')
+    .select('*')
+    .in('station_id', STATIONS.map((s) => s.id));
+  if (error || !data) return;
+  data.forEach(applyRow);
+  driftCheck();
+}
+
+// ---- playback ------------------------------------------------------------
+
+// Load the on-air track and seek to the shared second:
+// elapsed = now - started_at, clamped inside the file.
+async function syncPlayback() {
+  const token = ++loadToken;
+  const np = nowPlaying.get(active.id);
+  if (!np) { setStatus('NO SIGNAL'); return; }
+
+  const startedAt = parseTs(np.started_at);
+  const elapsed = (Date.now() - startedAt) / 1000;
+
+  // Stale row: the schedule says this track already ended. Re-read rather
+  // than seeking past the end of the file.
+  if (np.duration_seconds && elapsed > Number(np.duration_seconds) + 2) {
+    setStatus('RESYNCING');
+    refresh();
+    return;
+  }
+
+  setStatus('TUNING');
+  try {
+    const { data: track, error } = await sb
+      .from('radio_tracks')
+      .select('audio_url, duration_seconds')
+      .eq('track_id', np.track_id)
+      .maybeSingle();
+    if (token !== loadToken) return;
+    if (error || !track || !track.audio_url) throw new Error('track lookup failed');
+
+    lastLoadedKey = rowKey(np);
+    audio.src = track.audio_url;
+    await new Promise((resolve, reject) => {
+      const ok = () => { cleanup(); resolve(); };
+      const bad = () => { cleanup(); reject(new Error('audio failed to load')); };
+      const cleanup = () => {
+        audio.removeEventListener('loadedmetadata', ok);
+        audio.removeEventListener('error', bad);
+      };
+      audio.addEventListener('loadedmetadata', ok);
+      audio.addEventListener('error', bad);
+    });
+    if (token !== loadToken) return;
+
+    const dur = Number.isFinite(audio.duration) && audio.duration > 0
+      ? audio.duration
+      : Number(np.duration_seconds) || 0;
+    const offset = Math.min(Math.max((Date.now() - startedAt) / 1000, 0), Math.max(dur - 1, 0));
+    audio.currentTime = offset;
+    await audio.play();
+    if (token !== loadToken) { audio.pause(); return; }
+    setStatus('');
+  } catch (err) {
+    if (token !== loadToken) return;
+    lastLoadedKey = null;
+    setStatus('STREAM ERROR — RETRYING');
+    setTimeout(() => { if (playing && token === loadToken) syncPlayback(); }, 5000);
+  }
+}
+
+// If the playhead has wandered more than 3s off the shared second (tab was
+// backgrounded, buffering stall), snap it back. Checked on every poll.
+function driftCheck() {
+  if (!playing || audio.paused) return;
+  const np = nowPlaying.get(active.id);
+  if (!np || rowKey(np) !== lastLoadedKey) return;
+  const expected = (Date.now() - parseTs(np.started_at)) / 1000;
+  if (expected >= 0 && Number.isFinite(audio.duration) && Math.abs(audio.currentTime - expected) > 3) {
+    audio.currentTime = Math.min(Math.max(expected, 0), Math.max(audio.duration - 1, 0));
+  }
+}
+
+function stop() {
+  playing = false;
+  loadToken++; // cancels any in-flight load
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  lastLoadedKey = null;
+  renderPlayState();
+  setStatus('STANDBY');
+}
+
+// Browser autoplay policy: nothing plays until this click.
+$('playBtn').addEventListener('click', () => {
+  if (playing) { stop(); return; }
+  playing = true;
+  renderPlayState();
+  syncPlayback();
+});
+
+// The track ended locally but the server hasn't advanced our row yet —
+// re-read and wait; the realtime event or the poll brings the next track.
+audio.addEventListener('ended', () => {
+  if (playing) { setStatus('RESYNCING'); refresh(); }
+});
+
+// ---- presence ------------------------------------------------------------
+
+// The iOS app uses UPPERCASE uuids in its channel topics — match exactly so
+// web listeners land in the same presence room as phone listeners.
+function joinPresence() {
+  if (presenceChannel) { sb.removeChannel(presenceChannel); presenceChannel = null; }
+  $('liveCount').textContent = 'LIVE 0';
+  const ch = sb.channel('radio:' + active.id.toUpperCase(), {
+    config: { presence: { key: listenerId } },
+  });
+  const renderCount = () => {
+    $('liveCount').textContent = 'LIVE ' + Object.keys(ch.presenceState()).length;
+  };
+  ch.on('presence', { event: 'sync' }, renderCount)
+    .on('presence', { event: 'join' }, renderCount)
+    .on('presence', { event: 'leave' }, renderCount)
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') ch.track({ listener: listenerId });
+    });
+  presenceChannel = ch;
+}
+
+// ---- station toggle ------------------------------------------------------
+
+document.querySelectorAll('.tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const st = STATIONS.find((s) => s.id === tab.dataset.station);
+    if (!st || st.id === active.id) return;
+    active = st;
+    lastLoadedKey = null;
+    loadToken++; // invalidate loads aimed at the old station
+    renderStation();
+    joinPresence();
+    if (playing) {
+      syncPlayback();
+    } else {
+      audio.removeAttribute('src');
+      audio.load();
+    }
+  });
+});
+
+// ---- wiring --------------------------------------------------------------
+
+// Realtime is the fast path; the 15s poll is the fallback when the socket
+// drops or an event is missed. Both funnel through applyRow.
+sb.channel('web:now-playing')
+  .on('postgres_changes',
+      { event: '*', schema: 'public', table: 'radio_now_playing' },
+      (payload) => { if (payload.new) applyRow(payload.new); })
+  .subscribe();
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refresh(); // catch up after a backgrounded tab
+});
+
+renderStation();
+joinPresence();
+refresh();
+setInterval(refresh, 15000);
+</script>
+
+</body>
+</html>

@@ -29,12 +29,21 @@ final class RadioBackend {
     /// The shared clock: what the SERVER says is on air for the tuned
     /// station, and exactly when it started.
     var onRemoteClock: (_ trackID: UUID, _ startedAt: Date, _ duration: Double, _ stationID: String) -> Void = { _, _, _, _ in }
+    /// LIVE flips: a human takes (or leaves) the air on this station.
+    var onLiveShow: (_ live: Bool, _ title: String, _ hlsURL: String, _ stationID: String) -> Void = { _, _, _, _ in }
 
     private struct NowRow: Decodable {
         let station_id: UUID
         let track_id: UUID
         let started_at: Date
         let duration_seconds: Double
+    }
+
+    private struct LiveRow: Decodable {
+        let station_id: UUID
+        let live: Bool
+        let title: String
+        let hls_url: String
     }
 
     struct TrackRow: Decodable {
@@ -177,12 +186,42 @@ final class RadioBackend {
                 }
             }
 
+            // LIVE flips: when a human takes the air, every tuned device
+            // swaps from the rotation clock to the HLS stream — instantly.
+            let liveChanges = newChannel.postgresChange(
+                AnyAction.self,
+                schema: "public",
+                table: "radio_live"
+            )
+            let liveTask = Task { [weak self] in
+                for await change in liveChanges {
+                    guard let self, self.channel === newChannel else { return }
+                    let record: [String: AnyJSON]
+                    switch change {
+                    case .insert(let a): record = a.record
+                    case .update(let a): record = a.record
+                    default: continue
+                    }
+                    guard
+                        case let .string(rowStation)? = record["station_id"],
+                        rowStation.caseInsensitiveCompare(stationID) == .orderedSame
+                    else { continue }
+                    let live: Bool
+                    if case let .bool(b)? = record["live"] { live = b } else { live = false }
+                    let title: String
+                    if case let .string(t)? = record["title"] { title = t } else { title = "" }
+                    let hls: String
+                    if case let .string(h)? = record["hls_url"] { hls = h } else { hls = "" }
+                    self.onLiveShow(live, title, hls, stationID)
+                }
+            }
+
             // Every (re)join — first subscribe, socket auto-reconnect,
             // foreground after background — runs the same recovery: presence
             // resets to the fresh authoritative state, this device re-tracks
-            // itself, and the now_playing row is re-fetched (Realtime has no
-            // event replay, so any clock tick missed while offline is gone
-            // unless we ask).
+            // itself, and the now_playing + live rows are re-fetched
+            // (Realtime has no event replay, so any flip missed while
+            // offline is gone unless we ask).
             let statuses = newChannel.statusChange
             let statusTask = Task { [weak self] in
                 for await status in statuses {
@@ -191,6 +230,7 @@ final class RadioBackend {
                     self.presentKeys.removeAll()
                     try? await newChannel.track(state: ["listener": .string(self.listenerKey)])
                     await self.fetchNowPlaying(stationID: stationID, on: newChannel)
+                    await self.fetchLive(stationID: stationID, on: newChannel)
                 }
             }
 
@@ -198,6 +238,7 @@ final class RadioBackend {
                 self.streamTasks.append(presenceTask)
                 self.streamTasks.append(votesTask)
                 self.streamTasks.append(clockTask)
+                self.streamTasks.append(liveTask)
                 self.streamTasks.append(statusTask)
             }
 
@@ -235,6 +276,25 @@ final class RadioBackend {
                 return
             }
             try? await Task.sleep(nanoseconds: UInt64(1 << attempt) * 1_000_000_000)
+        }
+    }
+
+    /// Live state is re-fetched on every (re)join — a flip missed while
+    /// offline must not leave the device playing rotation over a live show,
+    /// or stuck in a show that already ended.
+    private func fetchLive(stationID: String, on channel: RealtimeChannelV2) async {
+        guard self.channel === channel else { return }
+        let rows: [LiveRow]? = try? await client
+            .from("radio_live")
+            .select()
+            .eq("station_id", value: stationID)
+            .execute()
+            .value
+        guard self.channel === channel else { return }
+        if let row = rows?.first {
+            onLiveShow(row.live, row.title, row.hls_url, stationID)
+        } else {
+            onLiveShow(false, "", "", stationID)
         }
     }
 

@@ -20,6 +20,10 @@ final class AppServices: ObservableObject {
     let meter: ListeningMeter
     /// The station's memory: airplays witnessed, boosts wagered.
     let airLog = AirLog()
+    /// THE RING — song battles (upload, vote, winner enters rotation).
+    let battles: BattleService
+    /// THE LINE — call-ins (hold to talk, moderated, aired between songs).
+    let callIn: CallInService
     /// The real numbers: presence + votes over Supabase realtime.
     private let backend: RadioBackend
 
@@ -96,6 +100,8 @@ final class AppServices: ObservableObject {
         self.activeStream = active
         self.player = RadioPlayer(stream: active)
         self.backend = RadioBackend(listenerKey: listener.id.uuidString)
+        self.battles = BattleService(listenerKey: listener.id.uuidString)
+        self.callIn = CallInService(listenerKey: listener.id.uuidString)
 
         streams.forEach { $0.start() }
 
@@ -139,6 +145,20 @@ final class AppServices: ObservableObject {
                         try? await Task.sleep(nanoseconds: UInt64(1 << attempt) * 2_000_000_000)
                     }
                 }
+            }
+        }
+        // LIVE flips: a human on the air overrides the rotation clock — but
+        // only for the station this device is tuned to; a flip on another
+        // station must never grab this player.
+        backend.onLiveShow = { [weak self] live, title, hls, stationID in
+            guard let self,
+                  self.activeStream.station.id.uuidString
+                      .caseInsensitiveCompare(stationID) == .orderedSame
+            else { return }
+            if live, !hls.isEmpty, let url = URL(string: hls) {
+                self.player.goLive(url: url, title: title.isEmpty ? "LIVE" : title)
+            } else if self.player.isLive {
+                self.player.endLive()
             }
         }
         backend.tune(toStationID: active.station.id.uuidString)

@@ -2,6 +2,7 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
+import MediaToolbox
 import Accelerate
 import Combine
 
@@ -62,6 +63,26 @@ public final class RadioPlayer: ObservableObject {
     }
     private var loadedKey: LoadKey?
 
+    // MARK: Streaming backend
+    //
+    // Local files play through AVAudioEngine (sample-accurate seek, mixer
+    // tap). Remote tracks STREAM through AVPlayer — audio starts in about a
+    // second instead of after a full-file download, which is what makes
+    // tune-in feel like turning on a radio — and an audio-mix tap
+    // (StreamTapContext) feeds the same live analysis, so the plate
+    // breathes identically for both. Live shows are HLS on the same player.
+    private var avPlayer: AVPlayer?
+    private var driftObserver: Any?
+    private var itemStatusObservation: NSKeyValueObservation?
+    /// True while a human owns the air (an HLS live show). Rotation clock
+    /// updates are ignored until the show ends.
+    @Published public private(set) var isLive = false
+    public private(set) var liveTitle: String = ""
+    private var liveURL: URL?
+    private var syntheticLevelsTask: Task<Void, Never>?
+    /// AVPlayer currently owns the air (a remote track or a live show).
+    private var streamActive: Bool { avPlayer?.currentItem != nil }
+
     public init(stream: LiveStreamService) {
         self.stream = stream
         engine.attach(node)
@@ -77,11 +98,15 @@ public final class RadioPlayer: ObservableObject {
     public func attach(to stream: LiveStreamService) {
         cancellables.removeAll()
         self.stream = stream
+        // Tuning always releases a live show's grip on the player — the new
+        // station's own live state (if any) re-asserts itself via the backend.
+        if isLive { isLive = false; liveURL = nil; liveTitle = "" }
+        syntheticLevelsTask?.cancel()
 
         stream.$nowPlaying
             .compactMap { $0 }
             .sink { [weak self] np in
-                guard let self else { return }
+                guard let self, !self.isLive else { return }
                 // Reschedule audio only when the broadcast actually moved —
                 // every vote and every listener join/leave republishes this
                 // struct, and a stop/reschedule per vote is an audible glitch.
@@ -102,7 +127,9 @@ public final class RadioPlayer: ObservableObject {
         // Radio, not a podcast: joining or resuming drops you at the *live*
         // second, never where you left off.
         isPlaying = true
-        if let np = stream.nowPlaying {
+        if isLive, let url = liveURL {
+            goLive(url: url, title: liveTitle) // rejoin the live edge
+        } else if let np = stream.nowPlaying {
             load(np)
         } else if !startEngineIfNeeded() {
             isPlaying = false // stay truthful if the session won't activate
@@ -112,6 +139,7 @@ public final class RadioPlayer: ObservableObject {
 
     public func pause() {
         node.pause()
+        avPlayer?.pause()
         isPlaying = false
         levels = .zero
         refreshNowPlayingInfo()
@@ -126,51 +154,195 @@ public final class RadioPlayer: ObservableObject {
 
     // MARK: - Scheduling
 
-    /// Open the track's asset and schedule it from the live edge. Remote
-    /// assets (the ALGO's server catalog) download to a local cache first —
-    /// AVAudioFile only reads local files.
+    /// Open the track's asset and join it at the live edge. Remote assets
+    /// STREAM (AVPlayer, progressive HTTP) — tune-in is ~a second; local
+    /// bundled files go through the engine (AVAudioFile only reads local).
     private func load(_ np: NowPlaying) {
         loadedKey = LoadKey(trackID: np.track.id, startedAt: np.startedAt)
         guard let url = np.track.assetURL else {
             node.stop()
+            avPlayer?.pause()
             refreshNowPlayingInfo()
             return
         }
         if url.scheme == "https" || url.scheme == "http" {
-            // Go silent now — the old station's segment must not keep playing
-            // under this station's metadata while the download runs.
-            node.stop()
-            let key = loadedKey
-            let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("radio-\(np.track.id.uuidString).\(url.pathExtension.isEmpty ? "mp3" : url.pathExtension)")
-            Task { @MainActor [weak self] in
-                if !FileManager.default.fileExists(atPath: cache.path) {
-                    // An HTTP 404/403 "succeeds" as a download of the error
-                    // body — caching that poisons the track forever. Only a
-                    // 200 payload may enter the cache.
-                    let fetched = try? await URLSession.shared.download(from: url)
-                    guard let (tmp, response) = fetched,
-                          (response as? HTTPURLResponse)?.statusCode == 200 else {
-                        // Reopen the door so the next publish (or our own
-                        // nudge below) can retry within this same song.
-                        guard let self, self.loadedKey == key else { return }
-                        self.loadedKey = nil
-                        try? await Task.sleep(nanoseconds: 5_000_000_000)
-                        guard self.loadedKey == nil,
-                              let np2 = self.stream.nowPlaying,
-                              np2.track.id == np.track.id else { return }
-                        self.load(np2)
-                        return
-                    }
-                    try? FileManager.default.moveItem(at: tmp, to: cache)
-                }
-                guard let self, self.loadedKey == key else { return } // stale
-                self.loadLocal(np, from: cache)
-            }
-            refreshNowPlayingInfo()
+            loadStream(np, from: url)
             return
         }
+        // Back to the engine: the stream player must not keep singing
+        // underneath the local file.
+        avPlayer?.pause()
+        avPlayer?.replaceCurrentItem(with: nil)
         loadLocal(np, from: url)
+    }
+
+    /// Stream a remote track from the shared second. An audio-mix tap feeds
+    /// the same spectrum analysis local playback gets, so the plate breathes
+    /// the actual music either way.
+    private func loadStream(_ np: NowPlaying, from url: URL) {
+        node.stop() // the engine goes silent; AVPlayer owns the air now
+        let key = loadedKey
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        let player = avPlayer ?? AVPlayer()
+        avPlayer = player
+        installDriftCorrector(on: player)
+
+        // A dead stream must never kill the station: reopen the load key
+        // after a beat so the next publish (or our own nudge) retries while
+        // the song is still on air.
+        itemStatusObservation?.invalidate()
+        itemStatusObservation = item.observe(\.status) { [weak self] observed, _ in
+            guard observed.status == .failed else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.loadedKey == key else { return }
+                self.loadedKey = nil
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard self.loadedKey == nil,
+                      let np2 = self.stream.nowPlaying,
+                      np2.track.id == np.track.id else { return }
+                self.load(np2)
+            }
+        }
+
+        Task { @MainActor [weak self] in
+            // Attach the FFT tap BEFORE the item goes live — swapping an
+            // audioMix mid-playback glitches. (Progressive files only; HLS
+            // never vends tap buffers, which goLive covers separately.)
+            if let tracks = try? await asset.loadTracks(withMediaType: .audio),
+               let track = tracks.first {
+                let params = AVMutableAudioMixInputParameters(track: track)
+                params.audioTapProcessor = StreamTapContext.makeTap { [weak self] levels in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.isPlaying else { return }
+                        guard Date().timeIntervalSince(self.lastPublish) > 1.0 / 30 else { return }
+                        self.lastPublish = Date()
+                        self.levels = levels
+                    }
+                }
+                let mix = AVMutableAudioMix()
+                mix.inputParameters = [params]
+                item.audioMix = mix
+            }
+            guard let self, self.loadedKey == key else { return } // stale: retuned
+            player.replaceCurrentItem(with: item)
+            let elapsed = np.elapsed(at: Date())
+            if elapsed > 0.05 {
+                await item.seek(
+                    to: CMTime(seconds: elapsed, preferredTimescale: 600),
+                    toleranceBefore: .zero,
+                    toleranceAfter: CMTime(seconds: 0.5, preferredTimescale: 600)
+                )
+            }
+            guard self.loadedKey == key else { return }
+            if self.isPlaying {
+                if self.activateSession() {
+                    player.play()
+                } else {
+                    // Session refused (phone call, etc.) — the UI must not
+                    // claim "playing" over silence.
+                    self.isPlaying = false
+                    self.levels = .zero
+                }
+            }
+        }
+        refreshNowPlayingInfo()
+    }
+
+    /// Streams drift: buffering delays the start, stalls pause the playhead.
+    /// Every 5s, snap back to the shared second when off by >2s — listeners
+    /// must never diverge from "everyone hears the same second".
+    private func installDriftCorrector(on player: AVPlayer) {
+        guard driftObserver == nil else { return }
+        driftObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 5, preferredTimescale: 600),
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.correctDrift() }
+        }
+    }
+
+    private func correctDrift() {
+        guard !isLive, isPlaying,
+              let player = avPlayer, let item = player.currentItem,
+              item.status == .readyToPlay,
+              let np = stream.nowPlaying,
+              np.track.assetURL?.scheme?.hasPrefix("http") == true else { return }
+        let expected = np.elapsed(at: Date())
+        guard expected < np.track.durationSeconds - 1 else { return }
+        let actual = item.currentTime().seconds
+        guard actual.isFinite, abs(actual - expected) > 2 else { return }
+        item.seek(
+            to: CMTime(seconds: expected, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: CMTime(seconds: 0.5, preferredTimescale: 600),
+            completionHandler: nil
+        )
+    }
+
+    // MARK: - Live shows
+
+    /// A human takes the air: play the HLS stream and freeze rotation
+    /// handling until the show ends. HLS never vends audio-mix tap buffers
+    /// (an Apple limitation), so the plate breathes on a synthetic low-key
+    /// pulse — ambiance, clearly generic, never presented as measurement.
+    public func goLive(url: URL, title: String) {
+        isLive = true
+        liveTitle = title
+        liveURL = url
+        loadedKey = nil
+        node.stop()
+        itemStatusObservation?.invalidate()
+        itemStatusObservation = nil
+        let player = avPlayer ?? AVPlayer()
+        avPlayer = player
+        installDriftCorrector(on: player)
+        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        if isPlaying {
+            if activateSession() {
+                player.play()
+                startSyntheticLiveLevels()
+            } else {
+                isPlaying = false
+                levels = .zero
+            }
+        }
+        refreshNowPlayingInfo()
+    }
+
+    /// The show ended: fall back to the rotation clock.
+    public func endLive() {
+        guard isLive else { return }
+        isLive = false
+        liveURL = nil
+        liveTitle = ""
+        syntheticLevelsTask?.cancel()
+        syntheticLevelsTask = nil
+        avPlayer?.pause()
+        avPlayer?.replaceCurrentItem(with: nil)
+        if let np = stream.nowPlaying { load(np) }
+        refreshNowPlayingInfo()
+    }
+
+    private func startSyntheticLiveLevels() {
+        syntheticLevelsTask?.cancel()
+        syntheticLevelsTask = Task { @MainActor [weak self] in
+            let t0 = Date()
+            while !Task.isCancelled {
+                if let self, self.isLive, self.isPlaying {
+                    let t = Date().timeIntervalSince(t0)
+                    let breathe = Float(0.5 + 0.5 * sin(t * 1.9))
+                    let flutter = Float.random(in: 0...0.15)
+                    self.levels = AudioLevels(
+                        rms: 0.25 + 0.25 * breathe + flutter,
+                        bass: 0.2 + 0.3 * breathe,
+                        mid: 0.25 + 0.2 * Float(0.5 + 0.5 * sin(t * 3.7)),
+                        treble: 0.15 + flutter
+                    )
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
     }
 
     private func loadLocal(_ np: NowPlaying, from url: URL) {
@@ -226,15 +398,20 @@ public final class RadioPlayer: ObservableObject {
         currentFormat = format
     }
 
+    /// Activate only when playback genuinely begins — activating at init
+    /// silences whatever the user was listening to before pressing play.
+    private func activateSession() -> Bool {
+        #if os(iOS)
+        do { try AVAudioSession.sharedInstance().setActive(true) } catch { return false }
+        #endif
+        return true
+    }
+
     @discardableResult
     private func startEngineIfNeeded() -> Bool {
         installTapIfNeeded()
         if engine.isRunning { return true }
-        #if os(iOS)
-        // Activate only when playback genuinely begins — activating at init
-        // silences whatever the user was listening to before pressing play.
-        do { try AVAudioSession.sharedInstance().setActive(true) } catch { return false }
-        #endif
+        guard activateSession() else { return false }
         engine.prepare()
         do {
             try engine.start()
@@ -284,6 +461,9 @@ public final class RadioPlayer: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.isPlaying else { return }
+                // Engine graph changes only matter to engine playback —
+                // reloading here would needlessly restart an AVPlayer stream.
+                guard !self.streamActive else { return }
                 // Rejoin the live edge on the new route/graph.
                 if let np = self.stream.nowPlaying { self.load(np) }
             }
@@ -301,9 +481,19 @@ public final class RadioPlayer: ObservableObject {
         tapInstalled = false
         currentFormat = nil
         loadedKey = nil
+        // The stream player died with the daemon too.
+        if let driftObserver { avPlayer?.removeTimeObserver(driftObserver) }
+        driftObserver = nil
+        itemStatusObservation?.invalidate()
+        itemStatusObservation = nil
+        avPlayer = nil
         configureAudioSession()
-        if wasPlaying, let np = stream.nowPlaying {
-            load(np)
+        if wasPlaying {
+            if isLive, let url = liveURL {
+                goLive(url: url, title: liveTitle)
+            } else if let np = stream.nowPlaying {
+                load(np)
+            }
         }
     }
 
@@ -389,6 +579,15 @@ public final class RadioPlayer: ObservableObject {
 
     /// Push current-track metadata (and live boost score) to the system.
     public func refreshNowPlayingInfo() {
+        if isLive {
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+                MPMediaItemPropertyTitle: liveTitle.isEmpty ? "LIVE" : liveTitle,
+                MPMediaItemPropertyArtist: stream.station.name,
+                MPNowPlayingInfoPropertyIsLiveStream: true,
+            ]
+            MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
+            return
+        }
         guard let np = stream.nowPlaying else { return }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: np.track.title,
@@ -489,6 +688,94 @@ final class SpectrumAnalyzer: @unchecked Sendable {
             vDSP_sve(ptr.baseAddress! + a, 1, &sum, vDSP_Length(b - a + 1))
         }
         return sqrt(sum / Float(b - a + 1))
+    }
+}
+
+// MARK: - Stream tap
+
+/// Feeds STREAMED audio through the same spectrum analysis local playback
+/// gets, via an `MTAudioProcessingTap` on the player item's audio mix.
+///
+/// Lifetime: the context is retained BY the tap (`passRetained` at create,
+/// released in `finalize`) and holds no reference back to the player. The
+/// tap itself is retained by the audio mix, which is retained by the item —
+/// so everything dies exactly when the item does. No cycles, and no
+/// dangling audio-thread pointer, because finalize runs only after the last
+/// process callback has drained.
+final class StreamTapContext {
+    private let analyzer = SpectrumAnalyzer()
+    private let onLevels: (AudioLevels) -> Void
+    private var sampleRate: Double = 44_100
+    private var channels: Int = 2
+    private var interleaved = false
+    private var scratch = [Float](repeating: 0, count: 4096)
+
+    private init(onLevels: @escaping (AudioLevels) -> Void) {
+        self.onLevels = onLevels
+    }
+
+    /// Build a tap ready to assign to `AVMutableAudioMixInputParameters
+    /// .audioTapProcessor`. Returns nil if MediaToolbox refuses (playback
+    /// then simply runs without live analysis — never blocked on visuals).
+    static func makeTap(onLevels: @escaping (AudioLevels) -> Void) -> MTAudioProcessingTap? {
+        let context = StreamTapContext(onLevels: onLevels)
+        var callbacks = MTAudioProcessingTapCallbacks(
+            version: kMTAudioProcessingTapCallbacksVersion_0,
+            clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque()),
+            init: { _, clientInfo, tapStorageOut in
+                tapStorageOut.pointee = clientInfo!
+            },
+            finalize: { tap in
+                Unmanaged<StreamTapContext>
+                    .fromOpaque(MTAudioProcessingTapGetStorage(tap)).release()
+            },
+            prepare: { tap, _, format in
+                let ctx = Unmanaged<StreamTapContext>
+                    .fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
+                let asbd = format.pointee
+                ctx.sampleRate = asbd.mSampleRate
+                ctx.channels = max(1, Int(asbd.mChannelsPerFrame))
+                ctx.interleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) == 0
+            },
+            unprepare: nil,
+            process: { tap, numberFrames, _, bufferListInOut, numberFramesOut, flagsOut in
+                guard MTAudioProcessingTapGetSourceAudio(
+                    tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut
+                ) == noErr else { return }
+                let ctx = Unmanaged<StreamTapContext>
+                    .fromOpaque(MTAudioProcessingTapGetStorage(tap)).takeUnretainedValue()
+                ctx.process(bufferList: bufferListInOut)
+            }
+        )
+        var tapOut: MTAudioProcessingTap?
+        guard MTAudioProcessingTapCreate(
+            kCFAllocatorDefault, &callbacks,
+            kMTAudioProcessingTapCreationFlag_PostEffects, &tapOut
+        ) == noErr, let tap = tapOut else { return nil }
+        return tap
+    }
+
+    /// Audio-thread hot path — allocation-free (scratch is preallocated).
+    private func process(bufferList: UnsafeMutablePointer<AudioBufferList>) {
+        let abl = UnsafeMutableAudioBufferListPointer(bufferList)
+        guard let first = abl.first, let data = first.mData else { return }
+        let floats = data.assumingMemoryBound(to: Float.self)
+        let totalFloats = Int(first.mDataByteSize) / MemoryLayout<Float>.size
+        guard totalFloats > 0 else { return }
+        let levels: AudioLevels
+        if interleaved, channels > 1 {
+            // Deinterleave channel 0 — an interleaved LRLR series through
+            // the FFT smears the spectrum with mirror images.
+            let frames = min(totalFloats / channels, scratch.count)
+            guard frames > 0 else { return }
+            for i in 0..<frames { scratch[i] = floats[i * channels] }
+            levels = scratch.withUnsafeBufferPointer { buf in
+                analyzer.analyze(buf.baseAddress!, count: frames, sampleRate: sampleRate)
+            }
+        } else {
+            levels = analyzer.analyze(floats, count: totalFloats, sampleRate: sampleRate)
+        }
+        onLevels(levels)
     }
 }
 #endif
