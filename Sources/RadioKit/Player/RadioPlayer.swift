@@ -48,6 +48,23 @@ public final class RadioPlayer: ObservableObject {
     private var node = AVAudioPlayerNode()
     private let analyzer = SpectrumAnalyzer()
 
+    // MARK: Sound modes
+    //
+    // The local chain gets real tonal DSP: node → eq → musicMixer → main.
+    // The analysis tap lives on musicMixer (music only), so the ambience node
+    // — a second player looping crackle/hiss straight into the main mixer —
+    // colours every path (local, stream, live) without polluting the meter.
+    private var eq = AVAudioUnitEQ(numberOfBands: 4)
+    private var musicMixer = AVAudioMixerNode()
+    private var ambience = AVAudioPlayerNode()
+    private let ambienceFormat = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+    private var ambienceBuffers: [SoundMode: AVAudioPCMBuffer] = [:]
+    private static let modeKey = "swell.soundMode"
+
+    /// The current listening mode. Persists across launches.
+    @Published public private(set) var mode: SoundMode =
+        SoundMode(rawValue: UserDefaults.standard.string(forKey: RadioPlayer.modeKey) ?? "") ?? .dolby
+
     private var stream: LiveStreamService
     private var cancellables: Set<AnyCancellable> = []
     private var currentFormat: AVAudioFormat?
@@ -85,11 +102,24 @@ public final class RadioPlayer: ObservableObject {
 
     public init(stream: LiveStreamService) {
         self.stream = stream
-        engine.attach(node)
+        attachAudioNodes()
         configureAudioSession()
         configureRemoteCommands()
         observeSystemAudioEvents()
         attach(to: stream)
+    }
+
+    /// Attach the music node, the effect chain, the submix, and the ambience
+    /// node, and wire the two fixed edges (submix→main, ambience→main). The
+    /// music node→eq→submix edge is (re)built per file in reconnectIfNeeded.
+    private func attachAudioNodes() {
+        engine.attach(node)
+        engine.attach(eq)
+        engine.attach(musicMixer)
+        engine.attach(ambience)
+        engine.connect(musicMixer, to: engine.mainMixerNode, format: nil)
+        engine.connect(ambience, to: engine.mainMixerNode, format: ambienceFormat)
+        applyModeEQ()
     }
 
     /// Retune to another station's stream. Stations are always-on — the old
@@ -134,12 +164,14 @@ public final class RadioPlayer: ObservableObject {
         } else if !startEngineIfNeeded() {
             isPlaying = false // stay truthful if the session won't activate
         }
+        ensureAmbience() // crackle/hiss over whatever path is now live
         refreshNowPlayingInfo()
     }
 
     public func pause() {
         node.pause()
         avPlayer?.pause()
+        ambience.stop()
         isPlaying = false
         levels = .zero
         refreshNowPlayingInfo()
@@ -390,11 +422,17 @@ public final class RadioPlayer: ObservableObject {
         refreshNowPlayingInfo()
     }
 
+    /// Rebuild the WHOLE local chain at the new file format — node → eq →
+    /// musicMixer. (musicMixer → main and ambience → main are fixed edges from
+    /// init.) Rebuilding the full chain, not just node→main, is what keeps the
+    /// effect units in circuit across a mid-session format change.
     private func reconnectIfNeeded(format: AVAudioFormat) {
         guard currentFormat?.sampleRate != format.sampleRate
             || currentFormat?.channelCount != format.channelCount else { return }
         engine.disconnectNodeOutput(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
+        engine.disconnectNodeOutput(eq)
+        engine.connect(node, to: eq, format: format)
+        engine.connect(eq, to: musicMixer, format: format)
         currentFormat = format
     }
 
@@ -419,6 +457,97 @@ public final class RadioPlayer: ObservableObject {
         } catch {
             return false
         }
+    }
+
+    // MARK: - Sound modes
+
+    /// Switch listening mode: retune the EQ, reschedule (or clear) the
+    /// ambience loop, and remember the choice.
+    public func setMode(_ newMode: SoundMode) {
+        guard newMode != mode else { return }
+        mode = newMode
+        UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)
+        applyModeEQ()
+        ambience.stop()          // clears the old loop
+        ensureAmbience()         // schedules the new one if this mode has it
+    }
+
+    /// Shape the local music chain per mode. All bands stay in circuit; DOLBY
+    /// just runs them near-flat (a touch of air), so the graph never changes.
+    private func applyModeEQ() {
+        func set(_ i: Int, _ type: AVAudioUnitEQFilterType, _ freq: Float, _ bw: Float, _ gain: Float) {
+            guard i < eq.bands.count else { return }
+            let b = eq.bands[i]
+            b.filterType = type; b.frequency = freq; b.bandwidth = bw
+            b.gain = gain; b.bypass = false
+        }
+        switch mode {
+        case .dolby:   // clean + a hint of air on top
+            set(0, .lowShelf, 100, 0.5, 0)
+            set(1, .parametric, 1_000, 1.0, 0)
+            set(2, .parametric, 4_000, 1.0, 1)
+            set(3, .highShelf, 10_000, 0.5, 2.5)
+            eq.globalGain = 0
+        case .vinyl:   // warm low end, top rolled off
+            set(0, .lowShelf, 120, 0.5, 3)
+            set(1, .parametric, 900, 1.2, 1)
+            set(2, .parametric, 3_500, 1.0, -2)
+            set(3, .highShelf, 7_000, 0.5, -12)
+            eq.globalGain = 1
+        case .cassette: // thin low, limited top, mid-forward
+            set(0, .lowShelf, 90, 0.5, -3)
+            set(1, .parametric, 1_200, 1.0, 1.5)
+            set(2, .parametric, 5_000, 1.2, -4)
+            set(3, .highShelf, 9_000, 0.5, -9)
+            eq.globalGain = 1
+        }
+    }
+
+    /// Start (or keep) the surface-noise loop for the current mode. Runs the
+    /// engine even under a remote stream so crackle/hiss reaches every path.
+    private func ensureAmbience() {
+        guard mode.hasAmbience, isPlaying else { stopAmbience(); return }
+        guard startEngineIfNeeded() else { return }
+        if ambienceBuffers[mode] == nil {
+            ambienceBuffers[mode] = makeAmbienceBuffer(for: mode)
+        }
+        guard let buf = ambienceBuffers[mode] else { return }
+        ambience.volume = mode == .vinyl ? 0.55 : 0.5
+        if !ambience.isPlaying {
+            ambience.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
+            ambience.play()
+        }
+    }
+
+    private func stopAmbience() {
+        if ambience.isPlaying { ambience.stop() }
+    }
+
+    /// Synthesize a seamless surface-noise loop — no shipped assets. VINYL is
+    /// sparse decaying pops over faint hiss; CASSETTE is steady tape hiss.
+    private func makeAmbienceBuffer(for mode: SoundMode) -> AVAudioPCMBuffer? {
+        let frames = AVAudioFrameCount(ambienceFormat.sampleRate * 4) // 4-second loop
+        guard let buf = AVAudioPCMBuffer(pcmFormat: ambienceFormat, frameCapacity: frames),
+              let data = buf.floatChannelData else { return nil }
+        buf.frameLength = frames
+        let n = Int(frames)
+        let channels = Int(ambienceFormat.channelCount)
+        var pop: Float = 0
+        for i in 0..<n {
+            var s: Float
+            switch mode {
+            case .vinyl:
+                if Float.random(in: 0..<1) < 0.0007 { pop = Float.random(in: -1...1) }
+                s = pop * 0.5 + Float.random(in: -1...1) * 0.015
+                pop *= 0.7 // a click, not a tone
+            case .cassette:
+                s = Float.random(in: -1...1) * 0.05
+            case .dolby:
+                s = 0
+            }
+            for c in 0..<channels { data[c][i] = s }
+        }
+        return buf
     }
 
     /// Interruptions (calls, Siri) and route/config changes (headphones,
@@ -477,7 +606,10 @@ public final class RadioPlayer: ObservableObject {
         let wasPlaying = isPlaying
         engine = AVAudioEngine()
         node = AVAudioPlayerNode()
-        engine.attach(node)
+        eq = AVAudioUnitEQ(numberOfBands: 4)
+        musicMixer = AVAudioMixerNode()
+        ambience = AVAudioPlayerNode()
+        attachAudioNodes()
         tapInstalled = false
         currentFormat = nil
         loadedKey = nil
@@ -522,7 +654,9 @@ public final class RadioPlayer: ObservableObject {
         guard !tapInstalled else { return }
         tapInstalled = true
         let analyzer = self.analyzer
-        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+        // Tap the MUSIC submix, not the main mixer — the plate must breathe on
+        // the song, never on the ambience crackle mixed in after it.
+        musicMixer.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             guard let self,
                   let channel = buffer.floatChannelData?[0] else { return }
             let levels = analyzer.analyze(

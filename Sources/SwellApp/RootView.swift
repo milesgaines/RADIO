@@ -37,6 +37,7 @@ private struct PlateView: View {
     @State private var showRing = false
     @State private var showCallIn = false
     @State private var showBroadcast = false
+    @State private var showSound = false
     @State private var showHostKey = false
     /// The transmit control only exists on a host device (key in Keychain).
     @State private var isHost = BroadcastService.isHost
@@ -177,28 +178,32 @@ private struct PlateView: View {
                 chrome(in: geo.size)
 
                 if recordIsOn, let np = stream.nowPlaying {
-                    VStack(spacing: 10) {
-                        Text("YOUR RECORD\nIS ON")
-                            .font(.custom("Gasoek One", size: 52))
-                            .multilineTextAlignment(.center)
-                            .foregroundStyle(ink)
-                        Text(np.track.title.uppercased())
-                            .font(.custom("Archivo Black", size: 14))
-                            .tracking(2)
-                            .foregroundStyle(ink.opacity(0.75))
-                        if let name = services.airLog.lastPayoffDedication {
-                            Text("this one goes out to \(name)")
-                                .font(.custom("Instrument Serif", size: 24))
-                                .foregroundStyle(ink)
-                                .padding(.top, 6)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(accent.opacity(0.96))
-                    .ignoresSafeArea()
+                    RecordIsOnView(track: np.track, accent: accent,
+                                   dedication: services.airLog.lastPayoffDedication,
+                                   bass: player.levels.bass)
+                        .transition(.opacity)
+                        .zIndex(3)
+                        .allowsHitTesting(false)
+                }
+
+                if dedicating {
+                    DedicationOverlay(accent: accent, name: $dedicationName,
+                        onSend: {
+                            if let id = stream.nowPlaying?.track.id {
+                                let n = dedicationName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                services.castMyVote(.boost, on: id, dedication: n.isEmpty ? nil : n)
+                                plate.strike()
+                                Haptics.boost()
+                            }
+                            dedicationName = ""
+                            withAnimation(.easeOut(duration: 0.25)) { dedicating = false }
+                        },
+                        onCancel: {
+                            dedicationName = ""
+                            withAnimation(.easeOut(duration: 0.25)) { dedicating = false }
+                        })
                     .transition(.opacity)
-                    .zIndex(3)
-                    .allowsHitTesting(false)
+                    .zIndex(4)
                 }
 
                 if showWelcome {
@@ -232,6 +237,9 @@ private struct PlateView: View {
                     onClose: { showCallIn = false }
                 )
             }
+            .sheet(isPresented: $showSound) {
+                SoundModeDeck(player: player, accent: accent, onClose: { showSound = false })
+            }
             .sheet(isPresented: $showBroadcast) {
                 BroadcastConsole(
                     service: services.broadcast,
@@ -247,20 +255,6 @@ private struct PlateView: View {
                     onSaved: { isHost = BroadcastService.isHost; showHostKey = false },
                     onClose: { showHostKey = false }
                 )
-            }
-            .alert("Send it out", isPresented: $dedicating) {
-                TextField("who's it for", text: $dedicationName)
-                Button("SEND IT") {
-                    if let id = stream.nowPlaying?.track.id {
-                        services.castMyVote(.boost, on: id, dedication: dedicationName)
-                        plate.strike()
-                        Haptics.boost()
-                    }
-                    dedicationName = ""
-                }
-                Button("Cancel", role: .cancel) { dedicationName = "" }
-            } message: {
-                Text("Boosts this record and puts their name on it when it airs.")
             }
             .onAppear {
                 plate.configure(size: geo.size)
@@ -416,6 +410,11 @@ private struct PlateView: View {
                             .foregroundStyle(broadcasting ? accent : bone.opacity(0.72))
                     }
                 }
+                // SOUND: vinyl / cassette / dolby — how the station sounds.
+                barButton { showSound = true } label: {
+                    Image(systemName: "opticaldisc")
+                        .foregroundStyle(player.mode == .dolby ? bone.opacity(0.72) : accent)
+                }
                 // THE RING: song battles — the one place "VS" appears.
                 barButton { showRing = true } label: {
                     Text("VS")
@@ -506,7 +505,7 @@ private struct PlateView: View {
             ControlDeck(stream: stream, accent: accent, onTune: { direction in
                 tune(direction)
             }, onDedicate: {
-                dedicating = true
+                withAnimation(.easeIn(duration: 0.2)) { dedicating = true }
             })
             .frame(maxWidth: .infinity)
             .padding(.top, 20)
