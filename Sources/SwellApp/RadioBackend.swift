@@ -18,8 +18,20 @@ final class RadioBackend {
     private var streamTasks: [Task<Void, Never>] = []
     private var presentKeys: Set<String> = []
 
-    /// Stable per-device identity — the persisted listener id.
-    let listenerKey: String
+    /// The identity a vote is cast under. Starts as the persisted per-device
+    /// id; once a listener signs in with Apple it's promoted to the Apple user
+    /// id, which is stable across reinstalls and devices — so one person is one
+    /// voter, not one install. Realtime handlers compare against this to skip
+    /// echoing this device's own votes back to it.
+    private(set) var listenerKey: String
+
+    /// Promote to the signed-in identity. Votes cast from here on are
+    /// attributed to the Apple id; the server's one-per-listener constraint
+    /// then binds to the person, not the device.
+    func adoptIdentity(_ key: String) {
+        guard !key.isEmpty else { return }
+        listenerKey = key
+    }
 
     /// Every callback names the station it belongs to, so a slow response
     /// that lands after a station switch is routed to the *right* stream —

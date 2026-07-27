@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Sign in with Apple: the identity behind "sign in to act". One Apple ID
+         is one voter, stable across reinstalls, so it doubles as the Sybil
+         boundary for vote integrity. Listening never requires it; only acting
+         (boost/bury, dedicate, go live) does. -->
+    <key>com.apple.developer.applesignin</key>
+    <array>
+        <string>Default</string>
+    </array>
+
     <!--
       CarPlay (com.apple.developer.carplay-audio) is intentionally absent for
       now: it is an Apple-managed entitlement that cannot be provisioned via

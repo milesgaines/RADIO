@@ -16,6 +16,7 @@ final class PhoneSceneDelegate: UIResponder, UIWindowSceneDelegate {
         let root = RootView()
             .environmentObject(AppServices.shared)
             .environmentObject(AppServices.shared.player)
+            .environmentObject(AuthService.shared)
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = UIHostingController(rootView: root)
         self.window = window

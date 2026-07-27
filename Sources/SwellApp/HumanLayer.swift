@@ -152,6 +152,7 @@ struct ControlDeck: View {
     @ObservedObject var stream: LiveStreamService
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var player: RadioPlayer
+    @EnvironmentObject private var auth: AuthService
     let accent: Color
     let onTune: (Int) -> Void
     var onDedicate: () -> Void = {}
@@ -165,8 +166,10 @@ struct ControlDeck: View {
 
             deckButton(icon: "arrow.down", label: "BURY", tint: HumanTheme.dim) {
                 if let id = stream.nowPlaying?.track.id {
-                    services.castMyVote(.bury, on: id)
-                    Haptics.tap()
+                    auth.requireSignIn(reason: "to bury this record") {
+                        services.castMyVote(.bury, on: id)
+                        Haptics.tap()
+                    }
                 }
             }
             .frame(maxWidth: .infinity)
@@ -209,8 +212,10 @@ struct ControlDeck: View {
             // Tap: boost. Hold: send it out to someone — radio's oldest ritual.
             deckButton(icon: "arrow.up", label: "BOOST", tint: accent) {
                 if let id = stream.nowPlaying?.track.id {
-                    services.castMyVote(.boost, on: id)
-                    Haptics.boost()
+                    auth.requireSignIn(reason: "to boost this record") {
+                        services.castMyVote(.boost, on: id)
+                        Haptics.boost()
+                    }
                 }
             }
             .simultaneousGesture(
@@ -352,7 +357,11 @@ struct WelcomeOverlay: View {
 struct ProfileSheet: View {
     @ObservedObject var stream: LiveStreamService
     @EnvironmentObject private var services: AppServices
+    @EnvironmentObject private var auth: AuthService
     let accent: Color
+    /// THE RING lives here now — a decisive top-bar declutter. Tapping it
+    /// dismisses this sheet and opens battles.
+    var onOpenRing: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -372,6 +381,44 @@ struct ProfileSheet: View {
                         .frame(width: 38, height: 38)
                         .background(Circle().strokeBorder(HumanTheme.bone.opacity(0.2), lineWidth: 1))
                 }
+            }
+
+            // Who you are on the air: signed in with Apple, or an anonymous
+            // voice until the first time you act.
+            HStack(spacing: 10) {
+                Image(systemName: auth.isSignedIn ? "checkmark.seal.fill" : "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(auth.isSignedIn ? accent : HumanTheme.dim)
+                Text(auth.isSignedIn ? (auth.displayName.map { $0.uppercased() } ?? "SIGNED IN") : "ANONYMOUS VOICE")
+                    .font(.custom("Archivo Black", size: 12))
+                    .tracking(1.2)
+                    .foregroundStyle(HumanTheme.bone)
+                Spacer()
+                if auth.isSignedIn {
+                    Button { auth.signOut() } label: {
+                        Text("SIGN OUT")
+                            .font(.custom("Archivo Black", size: 10))
+                            .tracking(1)
+                            .foregroundStyle(HumanTheme.dim)
+                    }
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .overlay(Rectangle().strokeBorder(HumanTheme.bone.opacity(0.15), lineWidth: 1))
+
+            // THE RING — song battles.
+            Button(action: onOpenRing) {
+                HStack {
+                    Text("VS").font(.custom("Archivo Black", size: 16)).foregroundStyle(accent)
+                    Text("THE RING · SONG BATTLES")
+                        .font(.custom("Archivo Black", size: 12)).tracking(1.2)
+                        .foregroundStyle(HumanTheme.bone)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(HumanTheme.dim)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 14)
+                .overlay(Rectangle().strokeBorder(HumanTheme.bone.opacity(0.15), lineWidth: 1))
             }
 
             // Vote power is the headline: this is the anti-bot trust system

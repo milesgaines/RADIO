@@ -30,6 +30,7 @@ private struct PlateView: View {
     @ObservedObject var broadcast: BroadcastService
     @EnvironmentObject private var services: AppServices
     @EnvironmentObject private var player: RadioPlayer
+    @EnvironmentObject private var auth: AuthService
 
     @State private var plate = CymaticPlate()
     @State private var showProfile = false
@@ -40,7 +41,11 @@ private struct PlateView: View {
     @State private var showHostKey = false
     /// The transmit control only exists on a host device (key in Keychain).
     @State private var isHost = BroadcastService.isHost
-    @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
+    /// First run: the landing "opens up" into the room, then a one-time tour.
+    /// The radio is already playing behind both — none of it gates sound.
+    private enum FirstRun { case landing, tour, done }
+    @State private var firstRun: FirstRun =
+        UserDefaults.standard.bool(forKey: "swell.welcomed") ? .done : .landing
     /// A record this listener boosted is airing right now — the marquee cap
     /// flips to YOUR PICK for a beat. Cold, in-place, no takeover.
     @State private var yourPick = false
@@ -174,7 +179,7 @@ private struct PlateView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .ignoresSafeArea()
-                    .gesture(plateGestures(in: geo.size), including: showWelcome ? .subviews : .all)
+                    .gesture(plateGestures(in: geo.size), including: firstRun == .done ? .all : .subviews)
 
                 chrome(in: geo.size)
 
@@ -183,9 +188,12 @@ private struct PlateView: View {
                         onSend: {
                             if let id = stream.nowPlaying?.track.id {
                                 let n = dedicationName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                services.castMyVote(.boost, on: id, dedication: n.isEmpty ? nil : n)
-                                plate.strike()
-                                Haptics.boost()
+                                // Dedicating is an act — sign in to send it out.
+                                auth.requireSignIn(reason: "to send it out") {
+                                    services.castMyVote(.boost, on: id, dedication: n.isEmpty ? nil : n)
+                                    plate.strike()
+                                    Haptics.boost()
+                                }
                             }
                             dedicationName = ""
                             withAnimation(.easeOut(duration: 0.25)) { dedicating = false }
@@ -198,20 +206,29 @@ private struct PlateView: View {
                     .zIndex(4)
                 }
 
-                if showWelcome {
-                    WelcomeOverlay(accent: accent) {
+                // First run: the branded landing irises open into the room
+                // (audio already playing), then the one-time walkthrough.
+                if firstRun == .landing {
+                    LandingCover(accent: accent) {
+                        withAnimation(.easeInOut(duration: 0.3)) { firstRun = .tour }
+                    }
+                    .transition(.opacity)
+                    .zIndex(3)
+                } else if firstRun == .tour {
+                    TourOverlay(accent: accent) {
                         UserDefaults.standard.set(true, forKey: "swell.welcomed")
-                        withAnimation(.easeOut(duration: 0.5)) { showWelcome = false }
-                        player.play()
-                        plate.isPlaying = true
+                        withAnimation(.easeOut(duration: 0.5)) { firstRun = .done }
                         Haptics.boost()
                     }
                     .transition(.opacity)
-                    .zIndex(2)
+                    .zIndex(3)
                 }
             }
             .sheet(isPresented: $showProfile) {
-                ProfileSheet(stream: stream, accent: accent)
+                ProfileSheet(stream: stream, accent: accent, onOpenRing: {
+                    showProfile = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showRing = true }
+                })
             }
             .fullScreenCover(isPresented: $showRing) {
                 BattleView(
@@ -248,8 +265,15 @@ private struct PlateView: View {
                     onClose: { showHostKey = false }
                 )
             }
+            .sheet(item: $auth.prompt, onDismiss: { auth.cancelPrompt() }) { prompt in
+                SignInSheet(accent: accent, reason: prompt.reason, onCancel: { auth.cancelPrompt() })
+            }
             .onAppear {
                 plate.configure(size: geo.size)
+                // Instant-on radio: sound the moment the app opens. The landing
+                // and tour ride on top of live audio; they never gate it.
+                if !player.isPlaying { player.play() }
+                plate.isPlaying = true
                 sync()
             }
             .onChange(of: stream.nowPlaying?.track.id) {
@@ -648,13 +672,17 @@ private struct PlateView: View {
 
     private func vote(_ direction: VoteDirection) {
         guard let id = stream.nowPlaying?.track.id else { return }
-        services.castMyVote(direction, on: id)
-        if direction == .boost {
-            plate.strike()
-            Haptics.boost()
-        } else {
-            plate.collapse()
-            Haptics.tap()
+        // Voting is an act: sign in with Apple the first time, then the vote
+        // this listener actually meant lands (never a wasted tap).
+        auth.requireSignIn(reason: direction == .boost ? "to boost this record" : "to bury this record") {
+            services.castMyVote(direction, on: id)
+            if direction == .boost {
+                plate.strike()
+                Haptics.boost()
+            } else {
+                plate.collapse()
+                Haptics.tap()
+            }
         }
     }
 

@@ -202,6 +202,14 @@ final class AppServices: ObservableObject {
                 self?.pushListenerToTallies()
             }
             .store(in: &cancellables)
+
+        // Sign in with Apple: listening never needs it, but the first time a
+        // listener acts, their Apple id becomes the vote identity — one person,
+        // one voter, stable across reinstalls. Re-promotes on launch for a
+        // returning signed-in listener.
+        AuthService.shared.configure { [weak self] appleUserID, _ in
+            self?.backend.adoptIdentity(appleUserID)
+        }
     }
 
     /// The stream owning a backend event, matched case-insensitively — the
