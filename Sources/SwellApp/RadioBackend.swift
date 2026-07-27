@@ -134,7 +134,10 @@ final class RadioBackend {
                     let record = insert.record
                     guard
                         case let .string(rowStation)? = record["station_id"],
-                        rowStation == stationID,
+                        // Votes store uppercase, but match case-insensitively
+                        // like the clock/live handlers do — an exact compare
+                        // silently dropped cross-cased votes from the tally.
+                        rowStation.caseInsensitiveCompare(stationID) == .orderedSame,
                         case let .string(rawTrack)? = record["track_id"],
                         let trackID = UUID(uuidString: rawTrack),
                         case let .string(fromKey)? = record["listener_key"],
@@ -298,23 +301,24 @@ final class RadioBackend {
         }
     }
 
-    /// Cast this device's vote into the shared stream. Fire-and-forget;
-    /// the local tally already applied it optimistically.
+    /// Cast this device's vote through the integrity RPC — one vote per device
+    /// per track, throttled and upserted server-side. Direct table inserts are
+    /// revoked, so this is the only path; the local tally already applied it
+    /// optimistically, so this stays fire-and-forget.
     func sendVote(stationID: String, trackID: UUID, direction: Int) {
-        Task { [client] in
-            struct Row: Encodable {
-                let station_id: String
-                let track_id: String
-                let listener_key: String
-                let direction: Int
+        Task { [client, listenerKey] in
+            struct Params: Encodable {
+                let p_station: String
+                let p_track: String
+                let p_listener: String
+                let p_direction: Int
             }
             _ = try? await client
-                .from("radio_votes")
-                .insert(Row(
-                    station_id: stationID,
-                    track_id: trackID.uuidString,
-                    listener_key: listenerKey,
-                    direction: direction
+                .rpc("radio_cast_vote", params: Params(
+                    p_station: stationID,
+                    p_track: trackID.uuidString,
+                    p_listener: listenerKey,
+                    p_direction: direction
                 ))
                 .execute()
         }

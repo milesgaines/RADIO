@@ -32,7 +32,6 @@ private struct PlateView: View {
     @EnvironmentObject private var player: RadioPlayer
 
     @State private var plate = CymaticPlate()
-    @State private var stationFlash: String?
     @State private var showProfile = false
     @State private var showRing = false
     @State private var showCallIn = false
@@ -42,7 +41,9 @@ private struct PlateView: View {
     /// The transmit control only exists on a host device (key in Keychain).
     @State private var isHost = BroadcastService.isHost
     @State private var showWelcome = !UserDefaults.standard.bool(forKey: "swell.welcomed")
-    @State private var recordIsOn = false
+    /// A record this listener boosted is airing right now — the marquee cap
+    /// flips to YOUR PICK for a beat. Cold, in-place, no takeover.
+    @State private var yourPick = false
     @State private var dedicating = false
     @State private var dedicationName = ""
     @State private var momentMarked = false
@@ -177,15 +178,6 @@ private struct PlateView: View {
 
                 chrome(in: geo.size)
 
-                if recordIsOn, let np = stream.nowPlaying {
-                    RecordIsOnView(track: np.track, accent: accent,
-                                   dedication: services.airLog.lastPayoffDedication,
-                                   bass: player.levels.bass)
-                        .transition(.opacity)
-                        .zIndex(3)
-                        .allowsHitTesting(false)
-                }
-
                 if dedicating {
                     DedicationOverlay(accent: accent, name: $dedicationName,
                         onSend: {
@@ -263,16 +255,16 @@ private struct PlateView: View {
             .onChange(of: stream.nowPlaying?.track.id) {
                 sync()
                 // Write the airplay into the ledger; if it pays off a boost
-                // this listener wagered, deliver the oldest thrill radio has:
-                // they finally played your record.
+                // this listener wagered, mark it — cold, in the marquee cap,
+                // not a full-screen victory lap.
                 if player.isPlaying, let np = stream.nowPlaying {
                     let paidOff = services.airLog.logPlay(track: np.track, station: stream.station)
                     if paidOff {
                         plate.strike()
                         Haptics.boost()
-                        withAnimation(.easeIn(duration: 0.25)) { recordIsOn = true }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) {
-                            withAnimation(.easeOut(duration: 0.9)) { recordIsOn = false }
+                        withAnimation(.easeIn(duration: 0.2)) { yourPick = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                            withAnimation(.easeOut(duration: 0.6)) { yourPick = false }
                         }
                     }
                 }
@@ -471,7 +463,7 @@ private struct PlateView: View {
             VStack(spacing: 0) {
                 emberRule
                 HStack(spacing: 12) {
-                    marqueeCap(player.isLive ? "LIVE" : "ON AIR")
+                    marqueeCap(player.isLive ? "LIVE" : (yourPick ? "YOUR PICK" : "ON AIR"))
                     if player.isLive {
                         Ticker(text: player.liveTitle.isEmpty
                                ? "LIVE ON \(stream.station.name.uppercased())"
@@ -509,15 +501,6 @@ private struct PlateView: View {
         .padding(.horizontal, 24)
         .padding(.bottom, 16)
         .overlay {
-            if let name = stationFlash {
-                Text(name.uppercased())
-                    .font(.custom("Gasoek One", size: 40))
-                    .foregroundStyle(accent)
-                    .shadow(color: ink, radius: 20)
-                    .transition(.scale(scale: 1.1).combined(with: .opacity))
-                    .id(name)
-                    .allowsHitTesting(false)
-            }
             if momentMarked {
                 Text("MARKED")
                     .font(.custom("Archivo Black", size: 13))
@@ -680,11 +663,9 @@ private struct PlateView: View {
         let next = (accentIndex + direction + streams.count) % streams.count
         plate.staticBurst() // between stations there is static
         services.tune(to: streams[next].station)
-        let name = streams[next].station.name
-        withAnimation(.easeIn(duration: 0.2)) { stationFlash = name }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-            if stationFlash == name { withAnimation(.easeOut(duration: 0.7)) { stationFlash = nil } }
-        }
+        // No name flash overlay — the hero sign (the giant call-number + name)
+        // already rolls to the new station and the room recolors. A second big
+        // name floating on top just doubled it up.
         Haptics.detent()
     }
 }
