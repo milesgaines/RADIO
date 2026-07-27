@@ -13,6 +13,17 @@ public struct Station: Identifiable, Hashable, Codable, Sendable {
     public let name: String
     public let tagline: String
     public let artworkURL: URL?
+    /// The tuner number on the dial — the giant lit call on the SIGN and the
+    /// badge in the car. Never a fake FM frequency: "PWR" is the flagship,
+    /// "78" is the deep-crate record speed, "1200" is the Technics, "247" is
+    /// around-the-clock. Kept as data so the phone and CarPlay agree.
+    public let dial: String
+    /// The small unit under the dial number ("RPM" for the record speeds, ""
+    /// for the call-sign numbers).
+    public let dialUnit: String
+    /// The always-on flagship (PWR DAMIZZA). The UI frames it as a continuous
+    /// 24/7 channel even while local rotation drives it between live shows.
+    public let isFlagship: Bool
     /// The catalog this station may draw from — the opt-in OneSync subset.
     public let catalogArtistIDs: Set<UUID>
 
@@ -20,12 +31,18 @@ public struct Station: Identifiable, Hashable, Codable, Sendable {
         id: UUID = UUID(),
         name: String,
         tagline: String,
+        dial: String = "",
+        dialUnit: String = "",
+        isFlagship: Bool = false,
         artworkURL: URL? = nil,
         catalogArtistIDs: Set<UUID> = []
     ) {
         self.id = id
         self.name = name
         self.tagline = tagline
+        self.dial = dial
+        self.dialUnit = dialUnit
+        self.isFlagship = isFlagship
         self.artworkURL = artworkURL
         self.catalogArtistIDs = catalogArtistIDs
     }

@@ -27,6 +27,8 @@ final class AppServices: ObservableObject {
     /// GO LIVE — a host takes the air (mic → HLS on the phone). Dormant unless
     /// a host key sits in the Keychain.
     let broadcast = BroadcastService()
+    /// HIT RECORD — tape the moment off the air into a keepable AIRCHECK.
+    let aircheck: AircheckService
     /// The real numbers: presence + votes over Supabase realtime.
     private let backend: RadioBackend
 
@@ -58,32 +60,17 @@ final class AppServices: ObservableObject {
         // album subfolder, one for the loose singles (each needs ≥3 tracks
         // so rotation has room to breathe). Otherwise fall back to the
         // silent three-station MockCatalog demo.
-        let realTracks = Self.loadRealAudio()
-        var stationCatalogs: [(Station, [Track])]
-        if realTracks.count >= 3 {
-            stationCatalogs = Self.realStations(from: realTracks)
-        } else {
-            stationCatalogs = MockCatalog.stations.map { ($0, MockCatalog.tracks(for: $0)) }
-        }
-        // THE UNDERGROUND: the public station — the whole OneSync roster,
-        // hydrating over the air. The ALGORITHM (trust-weighted crowd votes,
-        // never industry numbers) decides who breaks.
-        // (id keeps its original derivation string; server rows are seeded
-        // under it.)
-        stationCatalogs.append((Station(
-            id: FolderCatalog.stableID("station:the algo"),
-            name: "The Underground",
-            tagline: "The crowd breaks records here.",
-            catalogArtistIDs: []
-        ), []))
-        // THE WAVE: what's trending across the open web right now (Audius) —
-        // full-length, legal, hydrated over the air. Music that's actually out.
-        stationCatalogs.append((Station(
-            id: FolderCatalog.stableID("station:the wave"),
-            name: "The Wave",
-            tagline: "What's hot right now.",
-            catalogArtistIDs: []
-        ), []))
+        // THE DIAL — a fixed four-station lineup, always in this order:
+        //   PWR  · PWR DAMIZZA    the rhythmic flagship, on 24/7
+        //   78   · THE VAULT      unreleased mixes from the crates
+        //   1200 · THE UNDERGROUND the OneSync roster the crowd breaks
+        //   247  · THE WAVE       what's trending across the open web, right now
+        // Licensed masters hydrate the lineup when the RealAudio folder is
+        // bundled; otherwise the silent demo catalog stands in so the dial is
+        // never dead. THE UNDERGROUND and THE WAVE also hydrate over the air
+        // (roster feed / web trending) and keep their original server ids so
+        // seeded rows still resolve.
+        let stationCatalogs = Self.dialLineup(realTracks: Self.loadRealAudio())
 
         let streams = stationCatalogs.map { station, catalog in
             LiveStreamService(
@@ -102,6 +89,7 @@ final class AppServices: ObservableObject {
         let active = streams[0]
         self.activeStream = active
         self.player = RadioPlayer(stream: active)
+        self.aircheck = AircheckService(player: player)
         self.backend = RadioBackend(listenerKey: listener.id.uuidString)
         self.battles = BattleService(listenerKey: listener.id.uuidString)
         self.callIn = CallInService(listenerKey: listener.id.uuidString)
@@ -262,30 +250,49 @@ final class AppServices: ObservableObject {
         return FolderCatalog.load(from: folder)
     }
 
-    /// The full catalog is always station one; album subfolders and the
-    /// loose singles become their own stations when big enough to rotate.
-    private static func realStations(from realTracks: [Track]) -> [(Station, [Track])] {
-        func station(_ name: String, _ tagline: String, _ tracks: [Track]) -> (Station, [Track]) {
-            (Station(
-                id: FolderCatalog.stableID("station:\(name.lowercased())"),
-                name: name,
-                tagline: tagline,
-                catalogArtistIDs: Set(tracks.map(\.artistID))
-            ), tracks)
+    /// The fixed four-station dial. Every launch shows exactly these four in
+    /// this order; only their catalogs vary (licensed masters when the RealAudio
+    /// folder is present, the demo catalog otherwise). The two web/roster
+    /// stations keep their original derivation strings as ids so server-seeded
+    /// rows still resolve. All four are seeded locally so nothing is a silent
+    /// shell in the demo — real roster/trending rows hydrate over the air.
+    private static func dialLineup(realTracks: [Track]) -> [(Station, [Track])] {
+        let haveReal = realTracks.count >= 3
+        let pool = haveReal ? realTracks : MockCatalog.tracks
+
+        // Give each station its own rotation off the shared pool so they feel
+        // distinct even from one catalog. PWR DAMIZZA gets the whole thing; the
+        // others take thematic slices, never fewer than three so rotation breathes.
+        func slice(_ keep: (Int) -> Bool) -> [Track] {
+            let s = pool.enumerated().filter { keep($0.offset) }.map(\.element)
+            return s.count >= 3 ? s : pool
+        }
+        let power = pool
+        let vault = slice { $0 % 3 == 0 }        // every third cut — the deep crates
+        let underground = slice { $0 % 2 == 1 }  // the odd rows — roster seed
+        let wave = slice { $0 % 2 == 0 }         // the even rows — trending seed
+
+        func station(_ id: UUID, _ name: String, _ tagline: String,
+                     dial: String, unit: String = "", flagship: Bool = false,
+                     _ tracks: [Track]) -> (Station, [Track]) {
+            (Station(id: id, name: name, tagline: tagline, dial: dial,
+                     dialUnit: unit, isFlagship: flagship,
+                     catalogArtistIDs: Set(tracks.map(\.artistID))), tracks)
         }
 
-        var catalogs = [station("Swell", "Live from the OneSync catalog.", realTracks)]
-
-        let albums = Dictionary(grouping: realTracks.filter { $0.albumTitle != nil },
-                                by: { $0.albumTitle! })
-        for (album, tracks) in albums.sorted(by: { $0.key < $1.key }) where tracks.count >= 3 {
-            catalogs.append(station(album, "The album — sequenced by the crowd.", tracks))
-        }
-
-        let singles = realTracks.filter { $0.albumTitle == nil }
-        if singles.count >= 3 {
-            catalogs.append(station("Singles", "Every drop that stands alone.", singles))
-        }
-        return catalogs
+        return [
+            station(FolderCatalog.stableID("station:pwr damizza"), "PWR DAMIZZA",
+                    "Damizza's rhythmic flagship — on 24/7.",
+                    dial: "PWR", flagship: true, power),
+            station(FolderCatalog.stableID("station:the vault"), "The Vault",
+                    "Unreleased mixes, straight from the crates.",
+                    dial: "78", unit: "RPM", vault),
+            station(FolderCatalog.stableID("station:the algo"), "The Underground",
+                    "The OneSync roster — the crowd breaks records here.",
+                    dial: "1200", underground),
+            station(FolderCatalog.stableID("station:the wave"), "The Wave",
+                    "Trending across the open web, right now.",
+                    dial: "247", wave),
+        ]
     }
 }

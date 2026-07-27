@@ -38,6 +38,7 @@ private struct PlateView: View {
     @State private var showCallIn = false
     @State private var showBroadcast = false
     @State private var showSound = false
+    @State private var showAircheck = false
     @State private var showHostKey = false
     /// The transmit control only exists on a host device (key in Keychain).
     @State private var isHost = BroadcastService.isHost
@@ -91,18 +92,12 @@ private struct PlateView: View {
         services.streams.firstIndex(where: { $0 === stream }) ?? 0
     }
     private var accent: Color { CymaticPlate.accents[accentIndex % CymaticPlate.accents.count] }
-    /// No fake FM numbers — the dial speaks record culture, and every
-    /// number is literally true: 33⅓ is what an album spins at, 45 is what
-    /// a single IS, 78 is the deep-crate speed, and 808 is the machine the
-    /// whole genre is built on.
+    /// No fake FM numbers — the dial speaks record culture, and it's data on
+    /// the station now (Station.dial / .dialUnit): PWR is the flagship, 78 the
+    /// deep-crate speed, 1200 the Technics, 247 around-the-clock.
     private var dialLabel: (number: String, unit: String) {
-        let name = stream.station.name.lowercased()
-        if name == "singles" { return ("45", "RPM") }
-        if name == "the underground" { return ("1200", "") }
-        if name == "the wave" { return ("247", "") }
-        if name == "the vault" { return ("78", "RPM") }
-        if accentIndex == 0 { return ("808", "") }
-        return ("33\u{2153}", "RPM") // the album station
+        let s = stream.station
+        return (s.dial.isEmpty ? "808" : s.dial, s.dialUnit)
     }
 
     var body: some View {
@@ -249,6 +244,15 @@ private struct PlateView: View {
             .sheet(isPresented: $showSound) {
                 SoundModeDeck(player: player, accent: accent, onClose: { showSound = false })
             }
+            .sheet(isPresented: $showAircheck) {
+                AircheckSheet(
+                    service: services.aircheck,
+                    station: stream.station,
+                    now: stream.nowPlaying,
+                    accent: accent,
+                    onClose: { showAircheck = false }
+                )
+            }
             .sheet(isPresented: $showBroadcast) {
                 BroadcastConsole(
                     service: services.broadcast,
@@ -316,18 +320,29 @@ private struct PlateView: View {
             .allowsHitTesting(false)
     }
 
-    /// A top-bar action: a genuine 42-point tap target with a 16-point glyph,
-    /// so the chrome is hittable instead of a 12-point pinprick. An inner
-    /// `.font` on a Text label overrides the default (VS sets its own).
+    /// A top-bar action: a LABELED key — a 15pt glyph over a tiny caption, so
+    /// every control says what it opens instead of being a mystery glyph. The
+    /// caption is the whole "UI-friendly" fix; the tap target stays a full 44pt.
+    /// An inner `.font` on a Text label overrides the glyph default (VS, etc.).
     private func barButton<Label: View>(
+        _ caption: String,
         action: @escaping () -> Void,
         @ViewBuilder label: () -> Label
     ) -> some View {
         Button(action: action) {
-            label()
-                .font(.system(size: 16, weight: .semibold))
-                .frame(width: 38, height: 42)
-                .contentShape(Rectangle())
+            VStack(spacing: 3) {
+                label()
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(height: 19)
+                Text(caption)
+                    .font(.custom("Archivo Black", size: 7.5))
+                    .tracking(0.6)
+                    .foregroundStyle(bone.opacity(0.5))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(width: 40, height: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -389,60 +404,65 @@ private struct PlateView: View {
 
     private func chrome(in size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Status bar: one line, baseline-locked, ruled underneath.
-            HStack(alignment: .center, spacing: 3) {
-                // The wordmark doubles as the hidden host door: a long-press no
-                // ordinary listener would try opens the key entry. (No more
-                // "LOS ANGELES" — it only ever truncated, and its room is
-                // better spent on tappable controls.)
-                RadioPlusMark(size: 22, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
-                    .frame(height: 44)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        LongPressGesture(minimumDuration: 0.9)
-                            .onEnded { _ in showHostKey = true }
-                    )
-                Spacer(minLength: 4)
-                HStack(spacing: 5) {
-                    if player.isPlaying || broadcasting {
-                        Circle().fill(accent).frame(width: 6, height: 6)
+            // Chrome: wordmark + live status stacked on the left, a row of
+            // LABELED keys on the right. Every top control names itself now, so
+            // the bar reads as buttons, not decoration — and the caption idiom
+            // ties it to the bottom deck as one instrument.
+            HStack(alignment: .center, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
+                    // The wordmark doubles as the hidden host door: a long-press
+                    // no ordinary listener would try opens the key entry.
+                    RadioPlusMark(size: 22, accent: accent, level: player.isPlaying ? player.levels.bass : 0)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            LongPressGesture(minimumDuration: 0.9)
+                                .onEnded { _ in showHostKey = true }
+                        )
+                    HStack(spacing: 5) {
+                        if player.isPlaying || broadcasting {
+                            Circle().fill(accent).frame(width: 6, height: 6)
+                        }
+                        Text(broadcasting ? "ON AIR"
+                             : (player.isPlaying
+                                ? "LIVE · \(stream.nowPlaying?.liveListeners ?? 1) TUNED IN"
+                                : "OFF AIR"))
+                            .font(.custom("Archivo Black", size: 11))
+                            .tracking(1.2)
+                            .foregroundStyle(broadcasting || player.isPlaying ? bone.opacity(0.85) : bone.opacity(0.5))
+                            .monospacedDigit()
+                            .lineLimit(1).fixedSize()
                     }
-                    Text(broadcasting ? "ON AIR"
-                         : (player.isPlaying
-                            ? "LIVE \(stream.nowPlaying?.liveListeners ?? 1)"
-                            : "OFF AIR"))
-                        .font(.custom("Archivo Black", size: 12))
-                        .tracking(1.4)
-                        .foregroundStyle(broadcasting || player.isPlaying ? bone : bone.opacity(0.6))
-                        .monospacedDigit()
-                        .lineLimit(1).fixedSize()
                 }
-                Spacer(minLength: 4)
-                // Real tap targets: 42pt touch frames, 16pt glyphs, brighter.
+                Spacer(minLength: 6)
                 // GO LIVE: the host's transmit control (host devices only).
                 if isHost {
-                    barButton { showBroadcast = true } label: {
+                    barButton("LIVE") { showBroadcast = true } label: {
                         Image(systemName: "antenna.radiowaves.left.and.right")
-                            .foregroundStyle(broadcasting ? accent : bone.opacity(0.72))
+                            .foregroundStyle(broadcasting ? accent : bone.opacity(0.9))
                     }
                 }
                 // SOUND: vinyl / cassette / dolby — how the station sounds.
-                barButton { showSound = true } label: {
+                barButton("SOUND") { showSound = true } label: {
                     Image(systemName: "opticaldisc")
-                        .foregroundStyle(player.mode == .dolby ? bone.opacity(0.72) : accent)
+                        .foregroundStyle(player.mode == .dolby ? bone.opacity(0.9) : accent)
                 }
-                // THE RING: song battles — the one place "VS" appears.
-                barButton { showRing = true } label: {
+                // THE RING: song battles.
+                barButton("RING") { showRing = true } label: {
                     Text("VS")
-                        .font(.custom("Archivo Black", size: 15))
-                        .foregroundStyle(bone.opacity(0.72))
+                        .font(.custom("Archivo Black", size: 14))
+                        .foregroundStyle(bone.opacity(0.9))
                 }
                 // THE LINE: hold-to-talk call-ins.
-                barButton { showCallIn = true } label: {
-                    Image(systemName: "phone.fill").foregroundStyle(bone.opacity(0.72))
+                barButton("LINE") { showCallIn = true } label: {
+                    Image(systemName: "phone.fill").foregroundStyle(bone.opacity(0.9))
                 }
-                barButton { showProfile = true } label: {
-                    Image(systemName: "person.fill").foregroundStyle(bone.opacity(0.72))
+                // TAPE: hit record — tape the moment off the air (#30).
+                barButton("TAPE") { showAircheck = true } label: {
+                    Image(systemName: services.aircheck.isRecording ? "record.circle.fill" : "recordingtape")
+                        .foregroundStyle(services.aircheck.isRecording ? Color(red: 1, green: 0.32, blue: 0.28) : bone.opacity(0.9))
+                }
+                barButton("YOU") { showProfile = true } label: {
+                    Image(systemName: "person.fill").foregroundStyle(bone.opacity(0.9))
                 }
             }
             .padding(.top, 2)
@@ -470,6 +490,17 @@ private struct PlateView: View {
                             .font(.custom("Archivo Black", size: 12))
                             .tracking(2)
                             .foregroundStyle(bone.opacity(0.55))
+                    }
+                    // The flagship reads as a continuous channel — on 24/7 even
+                    // while rotation drives it between live shows.
+                    if stream.station.isFlagship {
+                        Text("24/7")
+                            .font(.custom("Archivo Black", size: 11))
+                            .tracking(1.4)
+                            .foregroundStyle(ink)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(accent))
                     }
                 }
             }
@@ -653,6 +684,13 @@ private struct PlateView: View {
                     .tracking(3)
                     .foregroundStyle(tint)
                     .opacity(progress > 0.25 ? 1 : 0)
+                // The semantics, right where the thumb is: votes program the
+                // rotation, they don't skip the song. Answers "what does this do?"
+                Text("SHAPES WHAT'S NEXT")
+                    .font(.custom("Archivo Black", size: 8))
+                    .tracking(2)
+                    .foregroundStyle(tint.opacity(0.7))
+                    .opacity(progress > 0.5 ? 1 : 0)
             }
             // A tight ink shadow keeps the mark legible before the vignette
             // fully lands (and against a bright transient kick).

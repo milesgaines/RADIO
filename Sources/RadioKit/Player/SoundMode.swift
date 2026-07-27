@@ -19,8 +19,8 @@ public enum SoundMode: String, CaseIterable, Sendable {
     public var blurb: String {
         switch self {
         case .dolby: return "CLEAN · BRIGHT · FULL RANGE"
-        case .vinyl: return "WARM · ROLLED OFF · CRACKLE"
-        case .cassette: return "BAND-LIMITED · TAPE HISS"
+        case .vinyl: return "WARM · WOW · CRACKLE · RUMBLE"
+        case .cassette: return "FLUTTER · TAPE HISS · LO-FI"
         }
     }
 

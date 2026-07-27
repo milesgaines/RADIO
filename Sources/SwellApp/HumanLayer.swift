@@ -158,13 +158,16 @@ struct ControlDeck: View {
     var onDedicate: () -> Void = {}
 
     var body: some View {
-        // Five stations of equal width, edge to edge — a real control row,
-        // not a centered clump.
+        VStack(spacing: 12) {
+        // Six controls of equal width, edge to edge — PREV · BURY · transport ·
+        // BOOST · NEXT. A real control row, not a centered clump.
         HStack(spacing: 0) {
-            deckButton(icon: "chevron.left", label: "TUNE") { onTune(-1) }
+            deckButton(icon: "chevron.left", label: "PREV") { onTune(-1) }
                 .frame(maxWidth: .infinity)
 
-            deckButton(icon: "arrow.down", label: "BURY", tint: HumanTheme.dim) {
+            // BURY reads at full contrast — the equal-and-opposite of BOOST, not
+            // a dimmed afterthought. Up boosts, down buries; that's the whole vote.
+            deckButton(icon: "arrow.down", label: "BURY", tint: HumanTheme.bone) {
                 if let id = stream.nowPlaying?.track.id {
                     auth.requireSignIn(reason: "to bury this record") {
                         services.castMyVote(.bury, on: id)
@@ -226,8 +229,22 @@ struct ControlDeck: View {
             )
             .frame(maxWidth: .infinity)
 
-            deckButton(icon: "chevron.right", label: "TUNE") { onTune(1) }
+            deckButton(icon: "chevron.right", label: "NEXT") { onTune(1) }
                 .frame(maxWidth: .infinity)
+        }
+
+        // The one line that answers "what do these do?" — votes aren't skips;
+        // they program the rotation. Persistent, so it survives past the tour.
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.up").font(.system(size: 9, weight: .heavy)).foregroundStyle(accent)
+            Text("BOOST").font(.custom("Archivo Black", size: 9)).tracking(1).foregroundStyle(HumanTheme.dim)
+            Text("·").foregroundStyle(HumanTheme.dim)
+            Image(systemName: "arrow.down").font(.system(size: 9, weight: .heavy)).foregroundStyle(HumanTheme.bone)
+            Text("BURY").font(.custom("Archivo Black", size: 9)).tracking(1).foregroundStyle(HumanTheme.dim)
+            Text("— YOU PROGRAM THE STATION").font(.custom("Archivo Black", size: 9)).tracking(0.6)
+                .foregroundStyle(HumanTheme.dim.opacity(0.8))
+        }
+        .lineLimit(1).minimumScaleFactor(0.7)
         }
     }
 
@@ -277,78 +294,6 @@ struct PressKey: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.93 : 1)
             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
-    }
-}
-
-// MARK: - First-launch instructions
-
-struct WelcomeOverlay: View {
-    let accent: Color
-    let onStart: () -> Void
-
-    var body: some View {
-        ZStack {
-            HumanTheme.ink.opacity(0.92).ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 26) {
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 12) {
-                    RadioPlusMark(size: 30, accent: accent)
-                    Text("THIS IS\nLIVE RADIO")
-                        .font(.custom("Gasoek One", size: 40))
-                        .foregroundStyle(HumanTheme.bone)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                VStack(alignment: .leading, spacing: 18) {
-                    rule(icon: "dot.radiowaves.left.and.right", color: accent,
-                         head: "One station, one moment",
-                         body: "Everyone tuned in hears the same second you do. No skipping — it's radio.")
-                    rule(icon: "arrow.up.circle.fill", color: accent,
-                         head: "The crowd programs it",
-                         body: "BOOST songs you love, BURY ones you don't. Votes shape what plays next.")
-                    rule(icon: "waveform", color: accent,
-                         head: "The sand is the song",
-                         body: "Every track vibrates its own pattern, live from the music. Watch it move on the kicks.")
-                    rule(icon: "hand.draw.fill", color: accent,
-                         head: "Shortcuts",
-                         body: "Flick ↑ boost · flick ↓ bury · swipe ↔ stations · double-tap marks the moment. The big button plays. Buttons do everything gestures do.")
-                }
-
-                Button(action: onStart) {
-                    Text("START LISTENING")
-                        .font(.custom("Archivo Black", size: 15))
-                        .tracking(2)
-                        .foregroundStyle(HumanTheme.ink)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 17)
-                        .background(accent)
-                }
-                .padding(.top, 6)
-
-                Spacer().frame(height: 20)
-            }
-            .padding(.horizontal, 26)
-        }
-    }
-
-    private func rule(icon: String, color: Color, head: String, body text: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(color)
-                .frame(width: 26)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(head)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(HumanTheme.bone)
-                Text(text)
-                    .font(.system(size: 13.5))
-                    .foregroundStyle(HumanTheme.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 }
 

@@ -56,6 +56,14 @@ public final class RadioPlayer: ObservableObject {
     // colours every path (local, stream, live) without polluting the meter.
     private var eq = AVAudioUnitEQ(numberOfBands: 4)
     private var musicMixer = AVAudioMixerNode()
+    /// Wow & flutter — the pitch instability that separates tape and vinyl from
+    /// clean digital, and the single most "real" cue the modes were missing. A
+    /// TimePitch node on the music mix, its `pitch` nudged a few cents by a slow
+    /// LFO. Pitch only, so the track's length (and the shared clock) never move.
+    /// DOLBY holds it dead flat.
+    private var wowFlutter = AVAudioUnitTimePitch()
+    private var wowTimer: Timer?
+    private var wowStart = Date()
     private var ambience = AVAudioPlayerNode()
     private let ambienceFormat = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
     private var ambienceBuffers: [SoundMode: AVAudioPCMBuffer] = [:]
@@ -116,8 +124,13 @@ public final class RadioPlayer: ObservableObject {
         engine.attach(node)
         engine.attach(eq)
         engine.attach(musicMixer)
+        engine.attach(wowFlutter)
         engine.attach(ambience)
-        engine.connect(musicMixer, to: engine.mainMixerNode, format: nil)
+        // Music runs through the wow/flutter node on its way to the main mix.
+        // The analysis tap stays on musicMixer (pre-wobble), so the plate reads
+        // clean levels while the ear hears the waver.
+        engine.connect(musicMixer, to: wowFlutter, format: nil)
+        engine.connect(wowFlutter, to: engine.mainMixerNode, format: nil)
         engine.connect(ambience, to: engine.mainMixerNode, format: ambienceFormat)
         applyModeEQ()
     }
@@ -165,6 +178,7 @@ public final class RadioPlayer: ObservableObject {
             isPlaying = false // stay truthful if the session won't activate
         }
         ensureAmbience() // crackle/hiss over whatever path is now live
+        startWowFlutter() // and the tape/vinyl waver
         refreshNowPlayingInfo()
     }
 
@@ -172,6 +186,7 @@ public final class RadioPlayer: ObservableObject {
         node.pause()
         avPlayer?.pause()
         ambience.stop()
+        stopWowFlutter()
         isPlaying = false
         levels = .zero
         refreshNowPlayingInfo()
@@ -470,6 +485,42 @@ public final class RadioPlayer: ObservableObject {
         applyModeEQ()
         ambience.stop()          // clears the old loop
         ensureAmbience()         // schedules the new one if this mode has it
+        startWowFlutter()        // and retune the wow/flutter depth (0 for DOLBY)
+    }
+
+    /// Drive the wow/flutter pitch wobble for the current mode — pitch only, a
+    /// few cents deep, so tape and vinyl waver like the real thing while the
+    /// track length (and the shared radio clock) never budge. DOLBY stays flat.
+    private func startWowFlutter() {
+        wowTimer?.invalidate(); wowTimer = nil
+        guard isPlaying, mode != .dolby else { wowFlutter.pitch = 0; return }
+        wowStart = Date()
+        let timer = Timer(timeInterval: 1.0 / 50, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let t = Date().timeIntervalSince(self.wowStart)
+            let cents: Double
+            switch self.mode {
+            case .vinyl:
+                // A 33⅓ platter: a slow once-around wow with a whisper of flutter.
+                cents = 7 * sin(2 * .pi * 0.55 * t) + 2.2 * sin(2 * .pi * 5.5 * t)
+            case .cassette:
+                // Capstan flutter is the cassette signature — faster and deeper,
+                // a slow bias drift riding underneath.
+                cents = 6 * sin(2 * .pi * 1.2 * t)
+                      + 5 * sin(2 * .pi * 10.5 * t)
+                      + 3 * sin(2 * .pi * 0.28 * t)
+            case .dolby:
+                cents = 0
+            }
+            self.wowFlutter.pitch = Float(cents)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        wowTimer = timer
+    }
+
+    private func stopWowFlutter() {
+        wowTimer?.invalidate(); wowTimer = nil
+        wowFlutter.pitch = 0
     }
 
     /// Shape the local music chain per mode. All bands stay in circuit; DOLBY
@@ -523,29 +574,77 @@ public final class RadioPlayer: ObservableObject {
         if ambience.isPlaying { ambience.stop() }
     }
 
-    /// Synthesize a seamless surface-noise loop — no shipped assets. VINYL is
-    /// sparse decaying pops over faint hiss; CASSETTE is steady tape hiss.
+    // MARK: - Aircheck tap (HIT RECORD)
+
+    /// Tap the whole program off the main mix so an AIRCHECK can be written to
+    /// disk. Returns the tap format (feed it to AVAudioFile), or nil if the
+    /// engine can't run — a remote stream on a clean route plays through
+    /// AVPlayer, not the engine, so there's nothing here to tape (the aircheck
+    /// keeps its card either way). Only one tap per bus; nothing else taps the
+    /// main mix (the FFT meter sits on `musicMixer`).
+    public func installAircheckTap(_ handler: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) -> AVAudioFormat? {
+        guard startEngineIfNeeded() else { return nil }
+        let mixer = engine.mainMixerNode
+        let format = mixer.outputFormat(forBus: 0)
+        guard format.channelCount > 0, format.sampleRate > 0 else { return nil }
+        mixer.removeTap(onBus: 0) // defensive: never stack taps
+        mixer.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, when in
+            handler(buffer, when)
+        }
+        return format
+    }
+
+    public func removeAircheckTap() {
+        engine.mainMixerNode.removeTap(onBus: 0)
+    }
+
+    /// Synthesize a seamless surface-noise loop — no shipped assets. VINYL lays
+    /// low-passed "fry" under sparse, decaying needle-clicks (each a real
+    /// multi-sample pop with a tail, not a lone spike) plus a touch of platter
+    /// rumble; CASSETTE is high-frequency-weighted tape hiss over a faint motor
+    /// hum — shaped, not flat white, so it reads as a machine and not static.
     private func makeAmbienceBuffer(for mode: SoundMode) -> AVAudioPCMBuffer? {
-        let frames = AVAudioFrameCount(ambienceFormat.sampleRate * 4) // 4-second loop
+        let sr = ambienceFormat.sampleRate
+        let frames = AVAudioFrameCount(sr * 6) // 6-second loop — less obvious cycling
         guard let buf = AVAudioPCMBuffer(pcmFormat: ambienceFormat, frameCapacity: frames),
               let data = buf.floatChannelData else { return nil }
         buf.frameLength = frames
         let n = Int(frames)
         let channels = Int(ambienceFormat.channelCount)
-        var pop: Float = 0
+
+        var lpPrev: Float = 0      // one-pole low-pass state (vinyl fry)
+        var hpPrev: Float = 0      // differentiator state (cassette hiss shaping)
+        var click: Float = 0       // current needle-click amplitude
+        var clickDecay: Float = 0.7
+        var phase = 0.0
+        let rumbleInc = 2 * Double.pi * 33.0 / sr   // ~33 Hz turntable rumble
+        let humInc = 2 * Double.pi * 62.0 / sr      // ~62 Hz cassette motor hum
+
         for i in 0..<n {
+            let w = Float.random(in: -1...1)
             var s: Float
             switch mode {
             case .vinyl:
-                if Float.random(in: 0..<1) < 0.0007 { pop = Float.random(in: -1...1) }
-                s = pop * 0.5 + Float.random(in: -1...1) * 0.015
-                pop *= 0.7 // a click, not a tone
+                lpPrev += (w - lpPrev) * 0.08
+                let fry = lpPrev * 0.22 + w * 0.004
+                if Float.random(in: 0..<1) < 0.00011 {           // ~5 audible pops/sec
+                    click = Float.random(in: 0.08...0.5) * (Bool.random() ? 1 : -1)
+                    clickDecay = Float.random(in: 0.55...0.85)
+                }
+                click *= clickDecay
+                phase += rumbleInc
+                s = fry + click + Float(sin(phase)) * 0.010
             case .cassette:
-                s = Float.random(in: -1...1) * 0.05
+                let hp = w - hpPrev; hpPrev = w                  // 6 dB/oct HP → bright hiss
+                phase += humInc
+                s = hp * 0.9 * 0.030 + Float(sin(phase)) * 0.005
             case .dolby:
                 s = 0
             }
-            for c in 0..<channels { data[c][i] = s }
+            // A hair of per-channel dither so the loop isn't dead-mono.
+            for c in 0..<channels {
+                data[c][i] = s + (mode == .dolby ? 0 : Float.random(in: -1...1) * 0.0015)
+            }
         }
         return buf
     }
@@ -608,6 +707,7 @@ public final class RadioPlayer: ObservableObject {
         node = AVAudioPlayerNode()
         eq = AVAudioUnitEQ(numberOfBands: 4)
         musicMixer = AVAudioMixerNode()
+        wowFlutter = AVAudioUnitTimePitch()
         ambience = AVAudioPlayerNode()
         attachAudioNodes()
         tapInstalled = false
@@ -626,6 +726,7 @@ public final class RadioPlayer: ObservableObject {
             } else if let np = stream.nowPlaying {
                 load(np)
             }
+            startWowFlutter()
         }
     }
 
