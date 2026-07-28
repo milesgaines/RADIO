@@ -29,6 +29,9 @@ final class AppServices: ObservableObject {
     let broadcast = BroadcastService()
     /// HIT RECORD — tape the moment off the air into a keepable AIRCHECK.
     let aircheck: AircheckService
+    /// THE READ — live audience research ("PPM for music"): per-record
+    /// resonance, per-market, that also drops records in and out of rotation.
+    let theRead: TheReadService
     /// The real numbers: presence + votes over Supabase realtime.
     private let backend: RadioBackend
 
@@ -90,6 +93,7 @@ final class AppServices: ObservableObject {
         self.activeStream = active
         self.player = RadioPlayer(stream: active)
         self.aircheck = AircheckService(player: player)
+        self.theRead = TheReadService(stream: active)
         self.backend = RadioBackend(listenerKey: listener.id.uuidString)
         self.battles = BattleService(listenerKey: listener.id.uuidString)
         self.callIn = CallInService(listenerKey: listener.id.uuidString)
@@ -191,6 +195,12 @@ final class AppServices: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // THE READ lives on its own cadence; surface its changes (e.g. a record
+        // starts BREAKING) through AppServices so the top-bar glyph re-tints.
+        theRead.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+
         // Sign in with Apple: listening never needs it, but the first time a
         // listener acts, their Apple id becomes the vote identity — one person,
         // one voter, stable across reinstalls. Re-promotes on launch for a
@@ -215,6 +225,7 @@ final class AppServices: ObservableObject {
         activeStream = stream
         player.attach(to: stream)
         player.refreshNowPlayingInfo()
+        theRead.retarget(to: stream)   // research + rotation gate follow the tune
         backend.tune(toStationID: stream.station.id.uuidString)
     }
 
@@ -222,6 +233,7 @@ final class AppServices: ObservableObject {
     /// (instant), the wager ledger, then out to every other device.
     func castMyVote(_ direction: VoteDirection, on trackID: UUID, dedication: String? = nil) {
         activeStream.vote(direction, on: trackID)
+        theRead.noteLocalVote()   // the readout reacts to your vote now, not next tick
         if direction == .boost { airLog.logBoost(trackID: trackID, dedication: dedication) }
         backend.sendVote(
             stationID: activeStream.station.id.uuidString,

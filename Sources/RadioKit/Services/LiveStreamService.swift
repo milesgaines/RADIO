@@ -249,6 +249,12 @@ public final class LiveStreamService: ObservableObject {
 
     // MARK: - Rotation
 
+    /// The live audience-research signal per track (∈ [-1, 1], 0 = neutral),
+    /// set by `ResonanceMonitor`. Cold records drop OUT of the weighted pool,
+    /// hot records get dropped IN. Default no-op until the first monitor tick,
+    /// so rotation behaves exactly as before while nothing is measuring.
+    public var resonanceBias: (UUID) -> Double = { _ in 0 }
+
     private func advance() {
         let n = now()
         let next = engine.selectNext(
@@ -256,6 +262,7 @@ public final class LiveStreamService: ObservableObject {
             netVoteWeight: { [weak self] track in self?.netWeights()[track.id] ?? 0 },
             history: history,
             now: n,
+            resonance: { [weak self] track in self?.resonanceBias(track.id) ?? 0 },
             random: random
         )
         guard let track = next else { return }
@@ -273,6 +280,64 @@ public final class LiveStreamService: ObservableObject {
         tally.netWeights(votes: votes, listeners: listeners, now: now())
     }
 
+    // MARK: - Audience research (PPM-for-music)
+
+    /// A point read of what the live audience is doing — the only new public
+    /// surface `ResonanceMonitor` needs. It derives everything from the private
+    /// `votes`/`listeners`/`nowPlaying` it already holds; the raw arrays never
+    /// cross the module boundary. O(votes); called at the monitor's tick rate.
+    public func researchSnapshot(velocityWindow: Double = 90, at reference: Date? = nil) -> StationResearchSnapshot {
+        let ref = reference ?? now()
+        let windowStart = ref.addingTimeInterval(-velocityWindow)
+        let net = netWeights()
+        let onAirID = nowPlaying?.track.id
+        let onAirStart = nowPlaying?.startedAt
+
+        var boostsWin: [UUID: Int] = [:]
+        var buriesWin: [UUID: Int] = [:]
+        var boostsThisPlay: [UUID: Int] = [:]
+        var lastVote: [UUID: Date] = [:]
+        for v in votes {
+            if v.castAt >= windowStart {
+                if v.direction == .boost { boostsWin[v.trackID, default: 0] += 1 }
+                else { buriesWin[v.trackID, default: 0] += 1 }
+            }
+            if v.direction == .boost, v.trackID == onAirID,
+               let start = onAirStart, v.castAt >= start {
+                boostsThisPlay[v.trackID, default: 0] += 1
+            }
+            if let prev = lastVote[v.trackID] { if v.castAt > prev { lastVote[v.trackID] = v.castAt } }
+            else { lastVote[v.trackID] = v.castAt }
+        }
+
+        var ids = Set(net.keys)
+        ids.formUnion(boostsWin.keys)
+        ids.formUnion(buriesWin.keys)
+        if let onAirID { ids.insert(onAirID) } // the on-air record always reads, even with no votes yet
+
+        var signals: [UUID: TrackResearchSignal] = [:]
+        for id in ids {
+            guard let track = catalog.first(where: { $0.id == id }) else { continue }
+            signals[id] = TrackResearchSignal(
+                trackID: id,
+                title: track.title,
+                artist: track.artistName,
+                netVoteWeight: net[id] ?? 0,
+                recentBoosts: boostsWin[id] ?? 0,
+                recentBuries: buriesWin[id] ?? 0,
+                boostsThisPlay: boostsThisPlay[id] ?? 0,
+                lastVoteAt: lastVote[id]
+            )
+        }
+        return StationResearchSnapshot(
+            capturedAt: ref,
+            liveListeners: displayListenerCount,
+            nowPlayingTrackID: onAirID,
+            nowPlayingStartedAt: onAirStart,
+            signals: signals
+        )
+    }
+
     /// A *preview* of likely-next tracks (top weighted, eligible). Shown on the
     /// phone only — never presented as "the exact next song", which would push
     /// us toward an interactive service. It's a teaser, not a schedule.
@@ -280,7 +345,8 @@ public final class LiveStreamService: ObservableObject {
         let n = now()
         let weights = netWeights()
         let ranked = catalog
-            .map { ($0, engine.weight(for: $0, netVoteWeight: weights[$0.id] ?? 0, history: history, now: n)) }
+            .map { ($0, engine.weight(for: $0, netVoteWeight: weights[$0.id] ?? 0,
+                                      history: history, now: n, resonance: resonanceBias($0.id))) }
             .filter { $0.1 > 0 && $0.0.id != nowPlaying?.track.id }
             .sorted { $0.1 > $1.1 }
             .prefix(3)

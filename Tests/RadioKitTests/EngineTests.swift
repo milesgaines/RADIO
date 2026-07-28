@@ -196,4 +196,104 @@ final class EngineTests: XCTestCase {
         let w = engine.weight(for: unlicensed, netVoteWeight: 99, history: [], now: now)
         XCTAssertEqual(w, 0, "A track without an interactive license must have zero weight")
     }
+
+    // MARK: - Resonance coupling ("drop records in and out")
+
+    func testResonanceNeutralIsIdenticalToLegacy() {
+        // resonance:0 must be a perfect no-op — this is what keeps every other
+        // rotation test valid without change.
+        let engine = WeightedRotationEngine(config: .init(voteSensitivity: 0.15))
+        let t = track("x", artist: 1)
+        let legacy = engine.weight(for: t, netVoteWeight: 3, history: [], now: now)
+        let explicit = engine.weight(for: t, netVoteWeight: 3, history: [], now: now, resonance: 0)
+        XCTAssertEqual(legacy, explicit, accuracy: 1e-12)
+        XCTAssertEqual(legacy, max(0.01, 1.0 * (1 + 0.15 * 3)), accuracy: 1e-12)
+    }
+
+    func testHotResonanceRaisesWeightWithinCap() {
+        let engine = WeightedRotationEngine() // promote 0.35, gain 1.5, cap 4
+        let t = track("x", artist: 1)
+        let base = engine.weight(for: t, netVoteWeight: 0, history: [], now: now, resonance: 0)
+        let warm = engine.weight(for: t, netVoteWeight: 0, history: [], now: now, resonance: 0.6)
+        let scorching = engine.weight(for: t, netVoteWeight: 0, history: [], now: now, resonance: 1.0)
+        XCTAssertGreaterThan(warm, base, "A hot record must be weighted up")
+        XCTAssertGreaterThan(scorching, warm)
+        XCTAssertLessThanOrEqual(scorching, base * 4.0 + 1e-9, "Promotion is capped")
+    }
+
+    func testBenchedTrackIsExcludedFromWeightedPool() {
+        let engine = WeightedRotationEngine()
+        let cold = track("cold", artist: 1)
+        let w = engine.weight(for: cold, netVoteWeight: 5, history: [], now: now, resonance: -0.9)
+        XCTAssertEqual(w, 0, "A record below the bench threshold leaves the weighted pool")
+    }
+
+    func testBreakingRecordWinsMoreThanFlatOnEqualVotes() {
+        let engine = WeightedRotationEngine()
+        let hot = track("hot", artist: 1)
+        let plain = track("plain", artist: 2)
+        let candidates = [hot, plain]
+        var wins = 0
+        let trials = 1000
+        for i in 0..<trials {
+            let r = Double(i) / Double(trials)
+            let pick = engine.selectNext(
+                candidates: candidates,
+                netVoteWeight: { _ in 0 },              // identical votes
+                history: [],
+                now: now,
+                resonance: { $0.id == hot.id ? 0.9 : 0 },
+                random: { r }
+            )
+            if pick?.id == hot.id { wins += 1 }
+        }
+        XCTAssertGreaterThan(wins, trials / 2, "A breaking record must out-spin a flat one on equal votes")
+    }
+
+    func testBenchedCatalogStillNeverGoesSilent() {
+        // Every record benched by resonance — the station must STILL air one.
+        let engine = WeightedRotationEngine()
+        let a = track("a", artist: 1)
+        let b = track("b", artist: 2)
+        let pick = engine.selectNext(
+            candidates: [a, b],
+            netVoteWeight: { _ in 0 },
+            history: [],
+            now: now,
+            resonance: { _ in -1.0 },
+            random: { 0.5 }
+        )
+        XCTAssertNotNil(pick, "Bench must never beat never-silent")
+    }
+
+    func testResonanceCannotResurrectUnlicensedOrComplementBlocked() {
+        let engine = WeightedRotationEngine(config: .init(maxConsecutivePerArtist: 2))
+        // Unlicensed + max resonance → still 0 (license guard runs first).
+        let unlicensed = Track(title: "no", artistID: artist(9), artistName: "A9",
+                               durationSeconds: 200, interactiveLicenseGranted: false)
+        XCTAssertEqual(engine.weight(for: unlicensed, netVoteWeight: 0,
+                                     history: [], now: now, resonance: 1.0), 0)
+        // Complement-blocked + max resonance → still 0 (complement runs before bench/promote).
+        let a1 = track("a1", artist: 1)
+        let a2 = track("a2", artist: 1)
+        let history = [
+            WeightedRotationEngine.PlayRecord(trackID: a1.id, artistID: artist(1), playedAt: now.addingTimeInterval(-300)),
+            WeightedRotationEngine.PlayRecord(trackID: a2.id, artistID: artist(1), playedAt: now.addingTimeInterval(-100)),
+        ]
+        let a3 = track("a3", artist: 1)
+        XCTAssertEqual(engine.weight(for: a3, netVoteWeight: 0,
+                                     history: history, now: now, resonance: 1.0), 0,
+                       "Guard order: license + complement win over resonance")
+    }
+
+    func testTinyCatalogDisablesBenching() {
+        // A ≤4-track pool must never bench (nothing to spare) — but promotion
+        // still applies.
+        let small = (0..<3).map { track("t\($0)", artist: $0 + 1) }
+        let config = WeightedRotationEngine.Config.adaptive(to: small)
+        XCTAssertEqual(config.benchThreshold, -.infinity)
+        let engine = WeightedRotationEngine(config: config)
+        let w = engine.weight(for: small[0], netVoteWeight: 0, history: [], now: now, resonance: -1.0)
+        XCTAssertGreaterThan(w, 0, "Tiny pools never bench")
+    }
 }

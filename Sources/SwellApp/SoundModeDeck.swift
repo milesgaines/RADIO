@@ -122,7 +122,7 @@ private struct SoundDevice: View {
                 switch mode {
                 case .vinyl: drawRecord(g, size, t)
                 case .cassette: drawCassette(g, size, t)
-                case .dolby: drawClean(g, size, t)
+                case .spatial: drawSpatial(g, size, t)
                 }
             }
         }
@@ -186,22 +186,34 @@ private struct SoundDevice: View {
         }
     }
 
-    // Clean / full-range: bright EQ bars that stand tall and even — the
-    // opposite of rolled-off. A gentle live shimmer off the level.
-    private func drawClean(_ g: GraphicsContext, _ size: CGSize, _ t: Double) {
-        let bars = 7
-        let gap: CGFloat = 5
-        let bw = (size.width - CGFloat(bars - 1) * gap) / CGFloat(bars)
-        for i in 0..<bars {
-            let phase = sin(t * 3 + Double(i) * 0.7) * 0.5 + 0.5
-            let base = 0.45 + 0.4 * CGFloat(phase) * CGFloat(spinning ? 1 : 0.3)
-            let h = size.height * base
-            let x = CGFloat(i) * (bw + gap)
-            let rect = CGRect(x: x, y: size.height - h, width: bw, height: h)
-            g.fill(Path(roundedRect: rect, cornerRadius: 2),
-                   with: .linearGradient(Gradient(colors: [bone, accent]),
-                                         startPoint: CGPoint(x: 0, y: rect.minY),
-                                         endPoint: CGPoint(x: 0, y: rect.maxY)))
+    // Spatial / 3D: a sound field. Concentric rings breathe outward from a
+    // point source that orbits the listener at the center — the head — so the
+    // emblem reads as sound placed *around* you, not bars on a screen.
+    private func drawSpatial(_ g: GraphicsContext, _ size: CGSize, _ t: Double) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        let maxR = min(size.width, size.height) / 2 - 3
+        // Rings expanding outward, fading as they go — wavefronts leaving the head.
+        let ringCount = 4
+        for i in 0..<ringCount {
+            let travel = (t * 0.5 + Double(i) / Double(ringCount)).truncatingRemainder(dividingBy: 1)
+            let r = maxR * CGFloat(0.28 + 0.72 * travel)
+            let fade = (1 - travel) * (spinning ? 1 : 0.4)
+            g.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                     with: .color(accent.opacity(0.10 + 0.5 * fade)),
+                     lineWidth: 1.5)
         }
+        // The listener's head at the center.
+        g.fill(Path(ellipseIn: CGRect(x: c.x - 5, y: c.y - 5, width: 10, height: 10)),
+               with: .color(bone.opacity(0.9)))
+        // A point source orbiting the head — the thing SPATIAL places in 3D.
+        let orbit = maxR * 0.62
+        let a = spinning ? t * 1.4 : -0.6
+        let src = CGPoint(x: c.x + cos(a) * orbit, y: c.y + sin(a) * orbit * 0.5) // ellipse: depth
+        // A soft glow behind the source so it reads as near/far as it orbits.
+        g.fill(Path(ellipseIn: CGRect(x: src.x - 9, y: src.y - 9, width: 18, height: 18)),
+               with: .radialGradient(Gradient(colors: [accent.opacity(0.55), .clear]),
+                                     center: src, startRadius: 0, endRadius: 9))
+        g.fill(Path(ellipseIn: CGRect(x: src.x - 3.5, y: src.y - 3.5, width: 7, height: 7)),
+               with: .color(accent))
     }
 }

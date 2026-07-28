@@ -31,13 +31,37 @@ public struct WeightedRotationEngine: Sendable {
         /// Rolling window used by the two limits above.
         public var windowSeconds: Double
 
+        // MARK: Live resonance coupling ("drop records in and out")
+        //
+        // A track's live resonance ∈ [-1, 1] (0 = neutral) shapes rotation on
+        // top of votes: cold records drop OUT (weight → 0, same effect as the
+        // complement guard), hot records get dropped IN (weight multiplied up
+        // to `maxPromoteMultiplier`). Neutral resonance (0) is a proven no-op —
+        // `0 > benchThreshold` and the promote term is 1.0 — so every existing
+        // call site and test is unchanged.
+
+        /// At or below this resonance a track is benched (excluded from the
+        /// weighted pool). Never-silent still holds: the fallback branch airs
+        /// the least-recently-played licensed track when everything is benched.
+        public var benchThreshold: Double
+        /// Above this resonance a track starts getting promoted.
+        public var promoteThreshold: Double
+        /// How hard promotion scales weight past the threshold.
+        public var promoteGain: Double
+        /// Ceiling on the promotion multiplier.
+        public var maxPromoteMultiplier: Double
+
         public init(
             editorialWeight: Double = 1.0,
             voteSensitivity: Double = 0.15,
             minRepeatGapSeconds: Double = 60 * 45,
             maxTracksPerArtistPerWindow: Int = 4,
             maxConsecutivePerArtist: Int = 2,
-            windowSeconds: Double = 60 * 60 * 3 // three hours
+            windowSeconds: Double = 60 * 60 * 3, // three hours
+            benchThreshold: Double = -0.6,
+            promoteThreshold: Double = 0.35,
+            promoteGain: Double = 1.5,
+            maxPromoteMultiplier: Double = 4.0
         ) {
             self.editorialWeight = editorialWeight
             self.voteSensitivity = voteSensitivity
@@ -45,6 +69,10 @@ public struct WeightedRotationEngine: Sendable {
             self.maxTracksPerArtistPerWindow = maxTracksPerArtistPerWindow
             self.maxConsecutivePerArtist = maxConsecutivePerArtist
             self.windowSeconds = windowSeconds
+            self.benchThreshold = benchThreshold
+            self.promoteThreshold = promoteThreshold
+            self.promoteGain = promoteGain
+            self.maxPromoteMultiplier = maxPromoteMultiplier
         }
 
         /// Defaults sized for a full production catalog, scaled down so a
@@ -57,6 +85,13 @@ public struct WeightedRotationEngine: Sendable {
             var config = Config()
             config.minRepeatGapSeconds = min(config.minRepeatGapSeconds, totalSeconds * 0.5)
             config.windowSeconds = min(config.windowSeconds, totalSeconds * 1.5)
+
+            // A tiny pool has nothing to spare: benching a record could shove
+            // rotation onto the never-silent fallback (which ignores votes AND
+            // resonance). Disable bench below 5 tracks; promotion still applies.
+            if catalog.count <= 4 {
+                config.benchThreshold = -.infinity
+            }
 
             let artistCount = Set(catalog.map(\.artistID)).count
             if artistCount <= 1 {
@@ -99,20 +134,39 @@ public struct WeightedRotationEngine: Sendable {
     /// Compute the (non-negative) selection weight of a single candidate.
     /// `netVoteWeight` is the summed effective vote weight for the track
     /// (boosts positive, buries negative) — typically from `VoteTally`.
+    /// `resonance` is the live audience-research signal ∈ [-1, 1] (0 = neutral):
+    /// cold records drop OUT (weight → 0), hot records get dropped IN (weight
+    /// scaled up). `resonance: 0` is a proven no-op — identical to the pre-
+    /// resonance weight — so every existing caller behaves exactly as before.
     public func weight(
         for track: Track,
         netVoteWeight: Double,
         history: [PlayRecord],
-        now: Date
+        now: Date,
+        resonance: Double = 0
     ) -> Double {
         guard track.interactiveLicenseGranted else { return 0 }
         guard isEligible(track, history: history, now: now) else { return 0 }
+
+        // DROP OUT: a record the room has clearly turned on leaves the weighted
+        // pool — the same effect the complement guard has, and equally safe:
+        // the never-silent fallback in selectNext ignores weights entirely.
+        // (resonance guards come AFTER license + complement so they can never
+        // resurrect an unlicensed or complement-blocked track.)
+        if resonance <= config.benchThreshold { return 0 }
 
         // A soft, monotonic response: boosts raise weight, buries lower it, but
         // weight can never go negative and a heavily-buried track still has a
         // whisper of a chance (nothing is ever hard-banned by the crowd).
         let raw = config.editorialWeight * (1.0 + config.voteSensitivity * netVoteWeight)
-        return max(0.01, raw)
+
+        // DROP IN: past the promote threshold, scale the weight up (capped), so
+        // a record the crowd is breaking spins more often.
+        let promote = min(
+            config.maxPromoteMultiplier,
+            1.0 + config.promoteGain * max(0, resonance - config.promoteThreshold)
+        )
+        return max(0.01, raw) * promote
     }
 
     /// Enforce repeat-gap + performance-complement rules.
@@ -151,10 +205,12 @@ public struct WeightedRotationEngine: Sendable {
         netVoteWeight: (Track) -> Double,
         history: [PlayRecord],
         now: Date,
+        resonance: (Track) -> Double = { _ in 0 },
         random: () -> Double = { Double.random(in: 0..<1) }
     ) -> Track? {
         let weighted = candidates.compactMap { track -> (Track, Double)? in
-            let w = weight(for: track, netVoteWeight: netVoteWeight(track), history: history, now: now)
+            let w = weight(for: track, netVoteWeight: netVoteWeight(track),
+                           history: history, now: now, resonance: resonance(track))
             return w > 0 ? (track, w) : nil
         }
 

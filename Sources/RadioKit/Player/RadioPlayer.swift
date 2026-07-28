@@ -60,10 +60,23 @@ public final class RadioPlayer: ObservableObject {
     /// clean digital, and the single most "real" cue the modes were missing. A
     /// TimePitch node on the music mix, its `pitch` nudged a few cents by a slow
     /// LFO. Pitch only, so the track's length (and the shared clock) never move.
-    /// DOLBY holds it dead flat.
+    /// SPATIAL holds it dead flat.
     private var wowFlutter = AVAudioUnitTimePitch()
     private var wowTimer: Timer?
     private var wowStart = Date()
+    // MARK: Spatial (real 3D)
+    //
+    // SPATIAL is genuine HRTF binaural rendering, not a marketing label. The
+    // environment node is the renderer; `spatialSource` is a plain mixer that
+    // sits directly on its input BECAUSE the 3D properties (sourceMode,
+    // renderingAlgorithm, position, reverbBlend) are read from the node feeding
+    // the environment, and that node must conform to `AVAudio3DMixing` —
+    // AVAudioMixerNode does, AVAudioUnitTimePitch (wowFlutter) does not. Both
+    // stay wired in for every mode; switching modes flips PROPERTIES only
+    // (never re-routes a live graph), and `.bypass` makes the pair a
+    // transparent wire so vinyl/cassette pass through untouched.
+    private var spatialSource = AVAudioMixerNode()
+    private var environment = AVAudioEnvironmentNode()
     private var ambience = AVAudioPlayerNode()
     private let ambienceFormat = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
     private var ambienceBuffers: [SoundMode: AVAudioPCMBuffer] = [:]
@@ -71,7 +84,7 @@ public final class RadioPlayer: ObservableObject {
 
     /// The current listening mode. Persists across launches.
     @Published public private(set) var mode: SoundMode =
-        SoundMode(rawValue: UserDefaults.standard.string(forKey: RadioPlayer.modeKey) ?? "") ?? .dolby
+        SoundMode(rawValue: UserDefaults.standard.string(forKey: RadioPlayer.modeKey) ?? "") ?? .spatial
 
     private var stream: LiveStreamService
     private var cancellables: Set<AnyCancellable> = []
@@ -125,14 +138,21 @@ public final class RadioPlayer: ObservableObject {
         engine.attach(eq)
         engine.attach(musicMixer)
         engine.attach(wowFlutter)
+        engine.attach(spatialSource)
+        engine.attach(environment)
         engine.attach(ambience)
-        // Music runs through the wow/flutter node on its way to the main mix.
-        // The analysis tap stays on musicMixer (pre-wobble), so the plate reads
-        // clean levels while the ear hears the waver.
+        // Music runs through the wow/flutter node, then the spatial pair, on its
+        // way to the main mix. The analysis tap stays on musicMixer (pre-wobble,
+        // pre-spatial), so the plate reads clean levels while the ear hears the
+        // waver and the room. The two spatial nodes stay in circuit for every
+        // mode; applySpatialMode() bypasses them for vinyl/cassette.
         engine.connect(musicMixer, to: wowFlutter, format: nil)
-        engine.connect(wowFlutter, to: engine.mainMixerNode, format: nil)
+        engine.connect(wowFlutter, to: spatialSource, format: nil)
+        engine.connect(spatialSource, to: environment, format: nil)
+        engine.connect(environment, to: engine.mainMixerNode, format: nil)
         engine.connect(ambience, to: engine.mainMixerNode, format: ambienceFormat)
         applyModeEQ()
+        applySpatialMode()
     }
 
     /// Retune to another station's stream. Stations are always-on — the old
@@ -483,17 +503,18 @@ public final class RadioPlayer: ObservableObject {
         mode = newMode
         UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)
         applyModeEQ()
+        applySpatialMode()       // 3D on for SPATIAL, transparent for vinyl/cassette
         ambience.stop()          // clears the old loop
         ensureAmbience()         // schedules the new one if this mode has it
-        startWowFlutter()        // and retune the wow/flutter depth (0 for DOLBY)
+        startWowFlutter()        // and retune the wow/flutter depth (0 for SPATIAL)
     }
 
     /// Drive the wow/flutter pitch wobble for the current mode — pitch only, a
     /// few cents deep, so tape and vinyl waver like the real thing while the
-    /// track length (and the shared radio clock) never budge. DOLBY stays flat.
+    /// track length (and the shared radio clock) never budge. SPATIAL stays flat.
     private func startWowFlutter() {
         wowTimer?.invalidate(); wowTimer = nil
-        guard isPlaying, mode != .dolby else { wowFlutter.pitch = 0; return }
+        guard isPlaying, mode != .spatial else { wowFlutter.pitch = 0; return }
         wowStart = Date()
         let timer = Timer(timeInterval: 1.0 / 50, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -509,7 +530,7 @@ public final class RadioPlayer: ObservableObject {
                 cents = 6 * sin(2 * .pi * 1.2 * t)
                       + 5 * sin(2 * .pi * 10.5 * t)
                       + 3 * sin(2 * .pi * 0.28 * t)
-            case .dolby:
+            case .spatial:
                 cents = 0
             }
             self.wowFlutter.pitch = Float(cents)
@@ -523,7 +544,7 @@ public final class RadioPlayer: ObservableObject {
         wowFlutter.pitch = 0
     }
 
-    /// Shape the local music chain per mode. All bands stay in circuit; DOLBY
+    /// Shape the local music chain per mode. All bands stay in circuit; SPATIAL
     /// just runs them near-flat (a touch of air), so the graph never changes.
     private func applyModeEQ() {
         func set(_ i: Int, _ type: AVAudioUnitEQFilterType, _ freq: Float, _ bw: Float, _ gain: Float) {
@@ -533,7 +554,7 @@ public final class RadioPlayer: ObservableObject {
             b.gain = gain; b.bypass = false
         }
         switch mode {
-        case .dolby:   // clean + a hint of air on top
+        case .spatial:   // clean + a hint of air on top; the 3D carries the character
             set(0, .lowShelf, 100, 0.5, 0)
             set(1, .parametric, 1_000, 1.0, 0)
             set(2, .parametric, 4_000, 1.0, 1)
@@ -551,6 +572,32 @@ public final class RadioPlayer: ObservableObject {
             set(2, .parametric, 5_000, 1.2, -4)
             set(3, .highShelf, 9_000, 0.5, -9)
             eq.globalGain = 1
+        }
+    }
+
+    /// Configure the SPATIAL renderer for the current mode — property flips
+    /// ONLY, never a graph re-route (that is the classic mid-playback crash).
+    /// `.ambienceBed` renders the finished STEREO mix as a bed placed around the
+    /// listener's head (binaural via HRTF) instead of collapsing it to a mono
+    /// point; `.bypass` turns the environment into a transparent wire so the
+    /// vinyl/cassette signal reaches the main mix untouched. `outputType = .auto`
+    /// is the graceful-degradation lever: HRTF on headphones, a clean stereo
+    /// downmix on a phone/car speaker rather than a phasey binaural artifact.
+    private func applySpatialMode() {
+        environment.outputType = .auto
+        switch mode {
+        case .spatial:
+            spatialSource.sourceMode = .ambienceBed
+            spatialSource.renderingAlgorithm = .auto
+            spatialSource.position = AVAudio3DPoint(x: 0, y: 0, z: 0)
+            spatialSource.reverbBlend = 0.25
+            environment.reverbParameters.enable = true
+            environment.reverbParameters.level = -8   // dB — a subtle room, not a hall
+            environment.reverbParameters.loadFactoryReverbPreset(.mediumRoom)
+        case .vinyl, .cassette:
+            spatialSource.sourceMode = .bypass         // transparent wire
+            spatialSource.reverbBlend = 0
+            environment.reverbParameters.enable = false
         }
     }
 
@@ -638,12 +685,12 @@ public final class RadioPlayer: ObservableObject {
                 let hp = w - hpPrev; hpPrev = w                  // 6 dB/oct HP → bright hiss
                 phase += humInc
                 s = hp * 0.9 * 0.030 + Float(sin(phase)) * 0.005
-            case .dolby:
+            case .spatial:
                 s = 0
             }
             // A hair of per-channel dither so the loop isn't dead-mono.
             for c in 0..<channels {
-                data[c][i] = s + (mode == .dolby ? 0 : Float.random(in: -1...1) * 0.0015)
+                data[c][i] = s + (mode == .spatial ? 0 : Float.random(in: -1...1) * 0.0015)
             }
         }
         return buf
@@ -708,8 +755,13 @@ public final class RadioPlayer: ObservableObject {
         eq = AVAudioUnitEQ(numberOfBands: 4)
         musicMixer = AVAudioMixerNode()
         wowFlutter = AVAudioUnitTimePitch()
+        // The spatial pair died with the daemon too — recreate both, or
+        // attachAudioNodes rebuilds the tail onto dead objects and the graph
+        // goes silent after any interruption/route change/media reset.
+        spatialSource = AVAudioMixerNode()
+        environment = AVAudioEnvironmentNode()
         ambience = AVAudioPlayerNode()
-        attachAudioNodes()
+        attachAudioNodes() // re-applies applySpatialMode() for the current mode
         tapInstalled = false
         currentFormat = nil
         loadedKey = nil

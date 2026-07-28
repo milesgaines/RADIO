@@ -39,6 +39,7 @@ private struct PlateView: View {
     @State private var showBroadcast = false
     @State private var showSound = false
     @State private var showAircheck = false
+    @State private var showRead = false
     @State private var showHostKey = false
     /// The transmit control only exists on a host device (key in Keychain).
     @State private var isHost = BroadcastService.isHost
@@ -253,6 +254,14 @@ private struct PlateView: View {
                     onClose: { showAircheck = false }
                 )
             }
+            .sheet(isPresented: $showRead) {
+                TheReadSheet(
+                    service: services.theRead,
+                    station: stream.station,
+                    accent: accent,
+                    onClose: { showRead = false }
+                )
+            }
             .sheet(isPresented: $showBroadcast) {
                 BroadcastConsole(
                     service: services.broadcast,
@@ -336,12 +345,12 @@ private struct PlateView: View {
                     .frame(height: 19)
                 Text(caption)
                     .font(.custom("Archivo Black", size: 7.5))
-                    .tracking(0.6)
+                    .tracking(0.4)
                     .foregroundStyle(bone.opacity(0.5))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
             }
-            .frame(width: 40, height: 44)
+            .frame(width: 34, height: 44)
             .contentShape(Rectangle())
         }
     }
@@ -430,7 +439,7 @@ private struct PlateView: View {
                             .tracking(1.2)
                             .foregroundStyle(broadcasting || player.isPlaying ? bone.opacity(0.85) : bone.opacity(0.5))
                             .monospacedDigit()
-                            .lineLimit(1).fixedSize()
+                            .lineLimit(1).minimumScaleFactor(0.7)
                     }
                 }
                 Spacer(minLength: 6)
@@ -441,10 +450,10 @@ private struct PlateView: View {
                             .foregroundStyle(broadcasting ? accent : bone.opacity(0.9))
                     }
                 }
-                // SOUND: vinyl / cassette / dolby — how the station sounds.
+                // SOUND: spatial / vinyl / cassette — how the station sounds.
                 barButton("SOUND") { showSound = true } label: {
                     Image(systemName: "opticaldisc")
-                        .foregroundStyle(player.mode == .dolby ? bone.opacity(0.9) : accent)
+                        .foregroundStyle(player.mode == .spatial ? bone.opacity(0.9) : accent)
                 }
                 // THE RING: song battles.
                 barButton("RING") { showRing = true } label: {
@@ -460,6 +469,11 @@ private struct PlateView: View {
                 barButton("TAPE") { showAircheck = true } label: {
                     Image(systemName: services.aircheck.isRecording ? "record.circle.fill" : "recordingtape")
                         .foregroundStyle(services.aircheck.isRecording ? Color(red: 1, green: 0.32, blue: 0.28) : bone.opacity(0.9))
+                }
+                // READ: live audience research — what's resonating, per market.
+                barButton("READ") { showRead = true } label: {
+                    Image(systemName: "chart.bar.xaxis")
+                        .foregroundStyle(services.theRead.hasBreaking ? accent : bone.opacity(0.9))
                 }
                 barButton("YOU") { showProfile = true } label: {
                     Image(systemName: "person.fill").foregroundStyle(bone.opacity(0.9))
