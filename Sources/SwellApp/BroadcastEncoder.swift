@@ -70,6 +70,11 @@ final class BroadcastEncoder: NSObject {
 
     private func startOnQueue() {
         guard writer == nil else { return }
+        // Fresh attempt: clear a prior run's terminal flag. Without this, one
+        // failure (a busy mic on show A) would permanently silence fail() for
+        // the reused encoder, leaving a later failed GO LIVE stuck with no
+        // error surfaced to the console.
+        failed = false
         #if targetEnvironment(simulator)
         // The simulator has no capture-grade audio device; fail honestly
         // rather than pretend to broadcast silence.
