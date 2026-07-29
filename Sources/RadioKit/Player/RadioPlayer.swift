@@ -1013,7 +1013,7 @@ final class StreamTapContext {
         let context = StreamTapContext(onLevels: onLevels)
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
-            clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque()),
+            clientInfo: Unmanaged.passRetained(context).toOpaque(),
             init: { _, clientInfo, tapStorageOut in
                 tapStorageOut.pointee = clientInfo!
             },
