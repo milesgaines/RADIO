@@ -211,6 +211,11 @@ public final class RadioPlayer: ObservableObject {
         levels = .zero
         refreshNowPlayingInfo()
         #if os(iOS)
+        // DJ MODE: the engine IS the transmitter. Pausing it (or handing the
+        // session back) would kill the live broadcast while the console still
+        // read ON AIR. The host stopping the music is not the host going off
+        // the air — keep the engine running and keep transmitting.
+        guard !djModeActive else { return }
         // Hand the audio session back so Music/podcasts can resume.
         engine.pause()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -234,6 +239,7 @@ public final class RadioPlayer: ObservableObject {
         }
         if url.scheme == "https" || url.scheme == "http" {
             loadStream(np, from: url)
+            refreshDJFeedTruth()   // remote record: it can't reach the feed
             return
         }
         // Back to the engine: the stream player must not keep singing
@@ -241,6 +247,7 @@ public final class RadioPlayer: ObservableObject {
         avPlayer?.pause()
         avPlayer?.replaceCurrentItem(with: nil)
         loadLocal(np, from: url)
+        refreshDJFeedTruth()       // engine record: music is in the feed again
     }
 
     /// Stream a remote track from the shared second. An audio-mix tap feeds
@@ -670,6 +677,10 @@ public final class RadioPlayer: ObservableObject {
     /// keeps its card either way). Only one tap per bus; nothing else taps the
     /// main mix (the FFT meter sits on `musicMixer`).
     public func installAircheckTap(_ handler: @escaping (AVAudioPCMBuffer, AVAudioTime) -> Void) -> AVAudioFormat? {
+        // One tap per bus: taping the main mix now would tear out the live
+        // broadcast feed and silently freeze every listener's playlist. The
+        // show wins; TAPE reports honestly that it can't roll.
+        guard !djModeActive else { return nil }
         guard startEngineIfNeeded() else { return nil }
         let mixer = engine.mainMixerNode
         let format = mixer.outputFormat(forBus: 0)
@@ -682,7 +693,233 @@ public final class RadioPlayer: ObservableObject {
     }
 
     public func removeAircheckTap() {
+        // Never touch the main-mix tap while DJ MODE owns it.
+        guard !djModeActive else { return }
         engine.mainMixerNode.removeTap(onBus: 0)
+    }
+
+    // MARK: - DJ MODE (GO LIVE with the music bed)
+    //
+    // The host's mic joins THIS engine: inputNode (voice-processing AEC so a
+    // speaker monitor can't howl) → a real DynamicsProcessor compressor → a
+    // gated mic mixer → the main mix. The music DUCKS under the voice via an
+    // envelope follower, and the broadcast feed is a tap on the main mix —
+    // music + voice exactly as the host hears it, handed to the HLS encoder
+    // as PCM. Music never pauses; the host monitors their own show live.
+
+    /// True while the mic is mixed over the music for broadcast.
+    public private(set) var djModeActive = false
+
+    /// TRUE when the record currently on air is a REMOTE stream, which plays
+    /// through AVPlayer — outside this engine — and therefore CANNOT be in the
+    /// broadcast feed. The host still hears it; listeners would get voice
+    /// only. The console surfaces this rather than quietly airing a mic-only
+    /// show that claims to be a DJ set. (Bundled masters — PWR, the Vault —
+    /// run through the engine and DO carry music.)
+    @Published public private(set) var djMusicMissingFromFeed = false
+
+    private func refreshDJFeedTruth() {
+        let missing = djModeActive && streamActive
+        if djMusicMissingFromFeed != missing { djMusicMissingFromFeed = missing }
+    }
+
+    private var micGain = AVAudioMixerNode()          // the gate rides this volume
+    private lazy var micCompressor: AVAudioUnitEffect = Self.makeCompressor()
+    private var djNodesAttached = false
+
+    // Duck + gate state, touched only on the mic-tap audio thread.
+    private let djState = DJAudioState()
+
+    /// The full program (music + mic) as rendered to the main mix, ~43 Hz.
+    /// CALLED ON THE AUDIO THREAD — the receiver must be realtime-safe.
+    public var onBroadcastBuffer: ((AVAudioPCMBuffer, AVAudioTime) -> Void)?
+    /// Mic loudness 0…1 (post-compressor), ~10 Hz on the main actor.
+    public var onMicLevel: ((Float) -> Void)?
+    /// The DJ audio path died mid-show (media reset, interruption) — the
+    /// broadcast must end rather than stream silence.
+    public var onDJInterrupted: (() -> Void)?
+
+    private static func makeCompressor() -> AVAudioUnitEffect {
+        let desc = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect,
+            componentSubType: kAudioUnitSubType_DynamicsProcessor,
+            componentManufacturer: kAudioUnitManufacturer_Apple,
+            componentFlags: 0, componentFlagsMask: 0)
+        return AVAudioUnitEffect(audioComponentDescription: desc)
+    }
+
+    /// Broadcast-voice compressor: tame peaks, lift the floor — radio voice.
+    private func configureCompressor() {
+        let unit = micCompressor.audioUnit
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_Threshold, kAudioUnitScope_Global, 0, -22, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_HeadRoom, kAudioUnitScope_Global, 0, 8, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_AttackTime, kAudioUnitScope_Global, 0, 0.004, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_ReleaseTime, kAudioUnitScope_Global, 0, 0.18, 0)
+        AudioUnitSetParameter(unit, kDynamicsProcessorParam_OverallGain, kAudioUnitScope_Global, 0, 4, 0)
+    }
+
+    /// Bring the mic into the graph and start feeding the broadcast tap.
+    /// Returns false if the session or engine refuses — the caller falls back
+    /// to the mic-only (radio-paused) broadcast path.
+    @discardableResult
+    public func startDJMode() -> Bool {
+        guard !djModeActive else { return true }
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .default,
+                                    options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setActive(true)
+        } catch { return false }
+        #endif
+
+        let wasPlaying = isPlaying
+        // The input path and voice processing can only change on a stopped
+        // engine; scheduled audio dies with the stop and is re-joined below.
+        node.stop()
+        ambience.stop()
+        engine.stop()
+
+        if !djNodesAttached {
+            engine.attach(micCompressor)
+            engine.attach(micGain)
+            djNodesAttached = true
+        }
+        // AEC + noise suppression: keeps a speaker monitor from howling and
+        // cleans the mic. Failure is non-fatal (headphone hosts don't need it).
+        // NOTE: taps the OUTPUT node into voice processing too — that colors
+        // the host's local monitor only; the broadcast tap sits upstream.
+        try? engine.inputNode.setVoiceProcessingEnabled(true)
+
+        // A 0-Hz / 0-channel input format means the session never gave us a
+        // real mic (no route, permission race). Connecting that raises an
+        // uncatchable exception — bail to the mic-only path instead.
+        let micFormat = engine.inputNode.outputFormat(forBus: 0)
+        guard micFormat.channelCount > 0, micFormat.sampleRate > 0 else {
+            tearDownDJGraph()
+            return false
+        }
+        engine.connect(engine.inputNode, to: micCompressor, format: micFormat)
+        engine.connect(micCompressor, to: micGain, format: micFormat)
+        // micGain is a mixer: it converts the (possibly 24/48 kHz mono) voice
+        // path to the main mix's format on its own.
+        engine.connect(micGain, to: engine.mainMixerNode, format: nil)
+        configureCompressor()
+        micGain.outputVolume = 1
+
+        installDJTaps()
+
+        engine.prepare()
+        do { try engine.start() } catch {
+            tearDownDJGraph()
+            return false
+        }
+        djModeActive = true
+        djState.remoteDuck = { [weak self] level in self?.avPlayer?.volume = level }
+        // Re-join the shared second — the engine restart dropped the schedule.
+        if wasPlaying {
+            if let np = stream.nowPlaying { load(np) }
+            ensureAmbience()
+            startWowFlutter()
+        }
+        refreshDJFeedTruth()
+        return true
+    }
+
+    /// Tear the mic out of the graph and hand the session back to playback.
+    public func stopDJMode() {
+        guard djModeActive else { return }
+        djModeActive = false
+        djState.remoteDuck = nil
+        avPlayer?.volume = 1
+        refreshDJFeedTruth()
+        engine.mainMixerNode.removeTap(onBus: 0)
+        micCompressor.removeTap(onBus: 0)
+
+        let wasPlaying = isPlaying
+        node.stop()
+        ambience.stop()
+        engine.stop()
+        tearDownDJGraph()
+        #if os(iOS)
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+        #endif
+        // Restore the music: the deck plays on after the show.
+        if wasPlaying {
+            if startEngineIfNeeded() {
+                if let np = stream.nowPlaying { load(np) }
+                ensureAmbience()
+                startWowFlutter()
+            }
+        }
+        // Music comes back up from wherever the duck left it.
+        musicMixer.outputVolume = 1
+        ambience.volume = mode == .vinyl ? 0.55 : 0.5
+    }
+
+    private func tearDownDJGraph() {
+        // Taps SURVIVE engine.stop() and disconnection. Leaving one behind
+        // means the next installTap on that bus raises an uncatchable
+        // "nullptr == Tap()" exception, and a stale main-mix tap would keep
+        // firing onBroadcastBuffer during ordinary playback.
+        if djNodesAttached {
+            micCompressor.removeTap(onBus: 0)
+            engine.mainMixerNode.removeTap(onBus: 0)
+            engine.disconnectNodeOutput(engine.inputNode)
+            engine.disconnectNodeOutput(micCompressor)
+            engine.disconnectNodeOutput(micGain)
+        }
+        try? engine.inputNode.setVoiceProcessingEnabled(false)
+    }
+
+    /// Two taps: the voice tap (level → gate + duck) and the program tap
+    /// (main mix → broadcast). Different nodes, so both are legal.
+    private func installDJTaps() {
+        let state = djState
+        // Voice: measure post-compressor RMS, drive the gate and the duck.
+        let micMixer = self.micGain
+        let music = self.musicMixer
+        let amb = self.ambience
+        let ambBase: Float = mode == .vinyl ? 0.55 : (mode == .cassette ? 0.5 : 0)
+        micCompressor.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            guard let channel = buffer.floatChannelData?[0] else { return }
+            var rms: Float = 0
+            vDSP_rmsqv(channel, 1, &rms, vDSP_Length(buffer.frameLength))
+            let voice = rms > 0.015                       // the gate threshold
+            // Fast attack, slow release — words open instantly, tails breathe.
+            state.duck = voice
+                ? min(1, state.duck + 0.35)
+                : max(0, state.duck - 0.03)
+            state.gate = voice
+                ? min(1, state.gate + 0.5)
+                : max(0, state.gate - 0.02)
+            // Mixer volumes are AU parameters — safe to set off-main.
+            micMixer.outputVolume = 0.15 + 0.85 * state.gate   // floor, not a hard cut
+            let musicLevel = 1 - 0.72 * state.duck             // duck to ~28%
+            music.outputVolume = musicLevel
+            if ambBase > 0 { amb.volume = ambBase * (1 - 0.85 * state.duck) }
+            // A remote record plays through AVPlayer, not this graph — duck it
+            // too so the host's own monitor ducks under their voice like the
+            // engine path does. (It still can't reach the broadcast feed.)
+            state.remoteDuck?(musicLevel)
+            // ~10 Hz level to the console meter.
+            let now = Date()
+            if now.timeIntervalSince(state.lastLevelPublish) > 0.1 {
+                state.lastLevelPublish = now
+                let level = max(0, min(1, rms * 6))
+                Task { @MainActor [weak self] in self?.onMicLevel?(level) }
+            }
+        }
+        // Program: the full mix, straight to the encoder.
+        engine.mainMixerNode.removeTap(onBus: 0)   // defensive: never stack
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, when in
+            self?.onBroadcastBuffer?(buffer, when)
+        }
+    }
+
+    /// The main mix's live render format — the encoder configures itself to it.
+    public var broadcastFormat: AVAudioFormat {
+        engine.mainMixerNode.outputFormat(forBus: 0)
     }
 
     /// Synthesize a seamless surface-noise loop — no shipped assets. VINYL lays
@@ -775,7 +1012,19 @@ public final class RadioPlayer: ObservableObject {
             object: engine, queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isPlaying else { return }
+                guard let self else { return }
+                // DJ MODE: the mic feed must survive a route/config change —
+                // restart the engine if the change stopped it, then rejoin.
+                if self.djModeActive {
+                    if !self.engine.isRunning {
+                        self.engine.prepare()
+                        try? self.engine.start()
+                    }
+                    if self.isPlaying, !self.streamActive,
+                       let np = self.stream.nowPlaying { self.load(np) }
+                    return
+                }
+                guard self.isPlaying else { return }
                 // Engine graph changes only matter to engine playback —
                 // reloading here would needlessly restart an AVPlayer stream.
                 guard !self.streamActive else { return }
@@ -790,6 +1039,11 @@ public final class RadioPlayer: ObservableObject {
     /// fresh graph, reassert the session category, and rejoin the live edge.
     private func recoverFromMediaServicesReset() {
         let wasPlaying = isPlaying
+        if djModeActive {
+            // The DJ graph died with the daemon; the show cannot survive it.
+            djModeActive = false
+            onDJInterrupted?()
+        }
         engine = AVAudioEngine()
         node = AVAudioPlayerNode()
         eq = AVAudioUnitEQ(numberOfBands: 4)
@@ -801,6 +1055,9 @@ public final class RadioPlayer: ObservableObject {
         spatialSource = AVAudioMixerNode()
         environment = AVAudioEnvironmentNode()
         ambience = AVAudioPlayerNode()
+        micGain = AVAudioMixerNode()
+        micCompressor = Self.makeCompressor()
+        djNodesAttached = false
         attachAudioNodes() // re-applies applySpatialMode() for the current mode
         tapInstalled = false
         currentFormat = nil
@@ -827,6 +1084,11 @@ public final class RadioPlayer: ObservableObject {
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         switch type {
         case .began:
+            if djModeActive {
+                // A call/Siri seized the mic mid-show — end the broadcast
+                // cleanly rather than stream silence to every listener.
+                onDJInterrupted?()
+            }
             pause() // UI stays truthful: we are not playing
         case .ended:
             let options = (info?[AVAudioSessionInterruptionOptionKey] as? UInt)
@@ -937,6 +1199,17 @@ public final class RadioPlayer: ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
     }
+}
+
+/// Mutable duck/gate envelopes touched only on the mic-tap audio thread.
+/// A reference box so the @MainActor player never crosses into it.
+final class DJAudioState: @unchecked Sendable {
+    var duck: Float = 0
+    var gate: Float = 0
+    var lastLevelPublish = Date.distantPast
+    /// Set while DJ mode runs: ducks the AVPlayer bed (remote records live
+    /// outside the engine). AVPlayer.volume is safe to set off the main thread.
+    var remoteDuck: ((Float) -> Void)?
 }
 
 // MARK: - Spectrum analysis

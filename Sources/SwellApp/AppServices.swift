@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Combine
 import RadioKit
 
@@ -175,6 +176,22 @@ final class AppServices: ObservableObject {
             self.player.pause()
         }
         broadcast.resumeRadio = { [weak self] in self?.player.play() }
+
+        // DJ MODE wiring: the broadcast borrows the player's engine — mic in,
+        // music ducked under the voice, and the rendered program (music + mic)
+        // streams out as the show. The buffer path runs on the audio thread
+        // (nonisolated seam), everything else on the main actor.
+        broadcast.startDJAudio = { [weak self] in self?.player.startDJMode() ?? false }
+        broadcast.stopDJAudio = { [weak self] in self?.player.stopDJMode() }
+        broadcast.djFeedFormat = { [weak self] in
+            self?.player.broadcastFormat
+                ?? AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+        }
+        player.onBroadcastBuffer = { [weak broadcast] buffer, when in
+            broadcast?.forwardMixed(buffer, at: when)
+        }
+        player.onMicLevel = { [weak self] level in self?.broadcast.setMicLevel(level) }
+        player.onDJInterrupted = { [weak self] in self?.broadcast.djAudioLost() }
 
         // Lock-screen / Siri "Boost" casts a REAL server vote (same path as the
         // CarPlay button), not a local-only bump — "real numbers only".

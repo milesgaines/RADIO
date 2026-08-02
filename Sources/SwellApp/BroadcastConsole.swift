@@ -16,6 +16,9 @@ import RadioKit
 
 struct BroadcastConsole: View {
     @ObservedObject var service: BroadcastService
+    /// The player is the transmitter in DJ MODE — the console reads its
+    /// feed-truth flag so the host is never told a lie about what's on air.
+    @ObservedObject var player: RadioPlayer
     let stationID: String
     let stationName: String
     let accent: Color
@@ -195,6 +198,26 @@ struct BroadcastConsole: View {
             // flooded station color.
             meter(level: service.level)
                 .frame(width: 200, height: 30)
+
+            // The one thing a DJ must never learn from a listener: a streamed
+            // record plays outside the broadcast engine, so it CANNOT be in
+            // the feed. Say it on the console rather than airing voice-only
+            // while the host hears a full set.
+            if player.djMusicMissingFromFeed {
+                VStack(spacing: 3) {
+                    Text("VOICE ONLY ON AIR")
+                        .font(.custom("Archivo Black", size: 11))
+                        .tracking(1.4)
+                    Text("THIS RECORD STREAMS — LISTENERS HEAR YOU, NOT IT")
+                        .font(.custom("Archivo Black", size: 8.5))
+                        .tracking(0.8)
+                        .opacity(0.75)
+                }
+                .foregroundStyle(ink)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .overlay(Rectangle().strokeBorder(ink.opacity(0.5), lineWidth: 1))
+            }
 
             boardButton
 

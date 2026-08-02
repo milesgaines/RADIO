@@ -39,6 +39,14 @@ final class BroadcastEncoder: NSObject {
 
     weak var delegate: BroadcastEncoderDelegate?
 
+    /// Where the audio comes from. `.microphone` is the original talk-stream
+    /// path (AVCaptureSession, mono). `.mixedFeed` is DJ MODE: the caller
+    /// pushes the engine's rendered program (music + mic) in as PCM via
+    /// `appendMixed`, and no capture session exists — which also means the
+    /// mixed path runs fine in the simulator.
+    enum Source { case microphone, mixedFeed }
+    private(set) var source: Source = .microphone
+
     /// ~4 s balances tune-in latency against segment/CDN overhead. The
     /// playlist's `TARGETDURATION` is derived from the segments we actually
     /// emit, never assumed from this.
@@ -54,6 +62,13 @@ final class BroadcastEncoder: NSObject {
     private var nextSequence = 0
     private var failed = false
     private var lastLevelPublish = Date.distantPast
+    /// Cached CMAudioFormatDescription for the mixed feed's PCM format —
+    /// rebuilt only if the format changes. TOUCHED ONLY ON THE AUDIO THREAD
+    /// (makeSampleBuffer); never cleared from the encoder queue.
+    private var mixedFormatDescription: CMAudioFormatDescription?
+    private var mixedFormatASBD = AudioStreamBasicDescription()
+    /// Monotonic PTS counter in frames — immune to engine-restart clock resets.
+    private var nextPTSFrames: CMTimeValue = 0
 
     init(segmentSeconds: Double = 4) {
         self.segmentSeconds = segmentSeconds
@@ -65,7 +80,113 @@ final class BroadcastEncoder: NSObject {
     /// Wire the capture graph and the HLS writer, then start pulling the mic.
     /// Safe to call once; call `stop()` before starting again.
     func start() {
-        queue.async { [weak self] in self?.startOnQueue() }
+        queue.async { [weak self] in
+            self?.source = .microphone
+            self?.startOnQueue()
+        }
+    }
+
+    /// DJ MODE: author the HLS stream from an externally-rendered PCM feed
+    /// (the engine's main mix). Stereo AAC — this is a music bed, not a talk
+    /// stream. `channels`/`sampleRate` should describe the feed.
+    func startMixed(sampleRate: Double, channels: Int) {
+        queue.async { [weak self] in
+            guard let self, self.writer == nil else { return }
+            self.source = .mixedFeed
+            self.failed = false
+            self.nextPTSFrames = 0   // fresh show ⇒ fresh timeline at zero
+            do {
+                try self.configureWriter(
+                    sampleRate: sampleRate > 0 ? sampleRate : 44_100,
+                    channels: max(1, min(2, channels)),
+                    bitRate: 128_000)
+            } catch {
+                self.fail("ENCODER FAILED")
+            }
+        }
+    }
+
+    /// Push one rendered PCM buffer from the engine's broadcast tap. CALLED ON
+    /// THE AUDIO THREAD: the conversion below copies the samples into a
+    /// CMSampleBuffer (CMSampleBufferSetDataBufferFromAudioBufferList copies),
+    /// so the tap's reusable buffer is never referenced after return.
+    func appendMixed(_ pcm: AVAudioPCMBuffer, at when: AVAudioTime) {
+        guard source == .mixedFeed, let sample = makeSampleBuffer(from: pcm) else { return }
+        queue.async { [weak self] in
+            guard let self, let writer = self.writer, let input = self.input else { return }
+            // A writer that fails mid-show must not silently swallow the rest
+            // of the broadcast — surface it so the show ends honestly.
+            if writer.status == .failed {
+                self.fail("ENCODER STOPPED")
+                return
+            }
+            guard writer.status == .writing else { return }
+            if !self.sessionStartedAtSource {
+                writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sample))
+                self.sessionStartedAtSource = true
+            }
+            if input.isReadyForMoreMediaData {
+                input.append(sample)
+            }
+        }
+    }
+
+    /// PCM → CMSampleBuffer, copying the payload. Realtime-safe enough for a
+    /// ~10 Hz tap cadence (allocation, no locks held elsewhere).
+    ///
+    /// TIMESTAMPS: the PTS is a MONOTONIC frame counter owned by the encoder,
+    /// not the tap's `AVAudioTime.sampleTime`. An engine stop/restart mid-show
+    /// (sample-rate-boundary reconnect, route change) resets the render clock
+    /// to ~0, and feeding that backwards to AVAssetWriter kills the session and
+    /// freezes the stream. Counting frames we actually appended keeps fMP4
+    /// gapless across every restart.
+    private func makeSampleBuffer(from pcm: AVAudioPCMBuffer) -> CMSampleBuffer? {
+        let frames = CMItemCount(pcm.frameLength)
+        guard frames > 0 else { return nil }
+        let asbd = pcm.format.streamDescription.pointee
+        let rate = Int32(pcm.format.sampleRate)
+        guard rate > 0 else { return nil }
+
+        // The cached format description is touched ONLY here, on the audio
+        // thread — teardown no longer clears it (that was a cross-thread
+        // CF store/load race); a fresh startMixed resets it on this thread
+        // via the sampleRate/flags comparison below.
+        if mixedFormatDescription == nil
+            || mixedFormatASBD.mSampleRate != asbd.mSampleRate
+            || mixedFormatASBD.mChannelsPerFrame != asbd.mChannelsPerFrame
+            || mixedFormatASBD.mFormatFlags != asbd.mFormatFlags {
+            var desc: CMAudioFormatDescription?
+            var mutableASBD = asbd
+            guard CMAudioFormatDescriptionCreate(
+                allocator: kCFAllocatorDefault, asbd: &mutableASBD,
+                layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil,
+                extensions: nil, formatDescriptionOut: &desc) == noErr, let desc else { return nil }
+            mixedFormatDescription = desc
+            mixedFormatASBD = asbd
+            nextPTSFrames = 0   // new format ⇒ new timeline
+        }
+        guard let format = mixedFormatDescription else { return nil }
+
+        let pts = CMTime(value: nextPTSFrames, timescale: rate)
+        nextPTSFrames += CMTimeValue(frames)
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: rate),
+            presentationTimeStamp: pts,
+            decodeTimeStamp: .invalid)
+
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreate(
+            allocator: kCFAllocatorDefault, dataBuffer: nil, dataReady: false,
+            makeDataReadyCallback: nil, refcon: nil,
+            formatDescription: format, sampleCount: frames,
+            sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+            sampleSizeEntryCount: 0, sampleSizeArray: nil,
+            sampleBufferOut: &sample) == noErr, let sample else { return nil }
+        guard CMSampleBufferSetDataBufferFromAudioBufferList(
+            sample, blockBufferAllocator: kCFAllocatorDefault,
+            blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: 0, bufferList: pcm.audioBufferList) == noErr else { return nil }
+        return sample
     }
 
     private func startOnQueue() {
@@ -93,7 +214,7 @@ final class BroadcastEncoder: NSObject {
         session.commitConfiguration()
 
         do {
-            try configureWriter()
+            try configureWriter(sampleRate: 44_100, channels: 1, bitRate: 96_000)
         } catch {
             fail("ENCODER FAILED")
             return
@@ -102,7 +223,7 @@ final class BroadcastEncoder: NSObject {
         #endif
     }
 
-    private func configureWriter() throws {
+    private func configureWriter(sampleRate: Double, channels: Int, bitRate: Int) throws {
         // The URL-less initializer is the segment-authoring path: no output
         // file, segments arrive via the delegate instead.
         let writer = try AVAssetWriter(contentType: UTType.mpeg4Movie)
@@ -114,9 +235,9 @@ final class BroadcastEncoder: NSObject {
 
         let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 44_100,
-            AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 96_000,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: channels,
+            AVEncoderBitRateKey: bitRate,
         ])
         input.expectsMediaDataInRealTime = true
         guard writer.canAdd(input) else { throw EncoderError.setup }
@@ -152,6 +273,10 @@ final class BroadcastEncoder: NSObject {
         input = nil
         sessionStartedAtSource = false
         nextSequence = 0
+        failed = false
+        // mixedFormatDescription is owned by the audio thread — clearing it
+        // here would be an unsynchronized CF store. startMixed resets the
+        // PTS timeline instead; the description reconciles on first buffer.
     }
 
     private func fail(_ message: String) {

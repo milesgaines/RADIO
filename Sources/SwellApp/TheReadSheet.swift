@@ -25,13 +25,18 @@ struct TheReadSheet: View {
 
             VStack(spacing: 0) {
                 header
-                // Honest state: one real room. The per-market lens returns
-                // when geo-tagged votes exist — no seeded market numbers shown.
+                // Honest source label: cross-device server aggregate when
+                // fresh rows exist, this device's monitor otherwise. The
+                // per-market lens returns when geo-tagged votes exist.
                 HStack(spacing: 6) {
-                    Image(systemName: "dot.radiowaves.left.and.right")
+                    Image(systemName: service.networkWide
+                          ? "antenna.radiowaves.left.and.right"
+                          : "dot.radiowaves.left.and.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(accent.opacity(0.8))
-                    Text("ONE LIVE ROOM · PER-MARKET ARRIVES WITH GEO-TAGGED VOTES")
+                    Text(service.networkWide
+                         ? "THE WHOLE ROOM · EVERY DEVICE, SUMMED · PER-MARKET ARRIVES WITH GEO VOTES"
+                         : "ONE LIVE ROOM · PER-MARKET ARRIVES WITH GEO-TAGGED VOTES")
                         .font(.custom("Archivo Black", size: 8.5))
                         .tracking(0.9)
                         .foregroundStyle(bone.opacity(0.55))

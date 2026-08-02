@@ -265,6 +265,7 @@ private struct PlateView: View {
             .sheet(isPresented: $showBroadcast) {
                 BroadcastConsole(
                     service: services.broadcast,
+                    player: player,
                     stationID: stream.station.id.uuidString,
                     stationName: stream.station.name,
                     accent: accent,

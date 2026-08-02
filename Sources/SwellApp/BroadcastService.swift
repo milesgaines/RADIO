@@ -53,10 +53,23 @@ final class BroadcastService: NSObject, ObservableObject {
     /// The station this broadcast owns (uppercased app id form).
     private(set) var stationID: String?
 
-    /// Pause/resume the radio around the broadcast — the mic can't share the
-    /// output with the plate, and the host isn't a listener while on air.
+    /// Pause/resume the radio around a MIC-ONLY broadcast — the fallback when
+    /// the DJ graph can't start. In DJ MODE the music never stops.
     var pauseRadio: () -> Void = {}
     var resumeRadio: () -> Void = {}
+
+    // MARK: DJ MODE seam (wired by AppServices to RadioPlayer)
+
+    /// Bring the mic into the player's engine (music keeps playing, ducked
+    /// under the voice). Returns false → fall back to mic-only.
+    var startDJAudio: () -> Bool = { false }
+    /// Tear the mic back out; the deck plays on.
+    var stopDJAudio: () -> Void = {}
+    /// Which path this show is using.
+    enum Mode { case dj, micOnly }
+    private(set) var mode: Mode = .micOnly
+    /// Read on the AUDIO thread by forwardMixed — benign single-writer flag.
+    private nonisolated(unsafe) var mixedFeedOpen = false
 
     private static let publishableKey = "sb_publishable_JYYXKdhcGnEP5curdG_pLg_XVcy9-ii"
     private static let ingestURL = URL(string: "https://tgkgdquivdoquxamtgcr.supabase.co/functions/v1/live-ingest")!
@@ -108,17 +121,25 @@ final class BroadcastService: NSObject, ObservableObject {
             guard granted else { self.state = .failed("MIC IS OFF — SETTINGS › RADI0"); return }
             #endif
 
-            // Borrow the audio session and clear the radio off the output.
-            self.pauseRadio()
-            #if os(iOS)
-            let audio = AVAudioSession.sharedInstance()
-            do {
-                try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-                try audio.setActive(true)
-            } catch {
-                self.state = .failed("MIC UNAVAILABLE"); return
+            // DJ MODE first: the mic joins the music engine, the deck keeps
+            // spinning, the voice rides over a ducked bed. Only if that graph
+            // refuses do we fall back to the original mic-only talk stream.
+            if self.startDJAudio() {
+                self.mode = .dj
+            } else {
+                self.mode = .micOnly
+                // Borrow the audio session and clear the radio off the output.
+                self.pauseRadio()
+                #if os(iOS)
+                let audio = AVAudioSession.sharedInstance()
+                do {
+                    try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
+                    try audio.setActive(true)
+                } catch {
+                    self.state = .failed("MIC UNAVAILABLE"); return
+                }
+                #endif
             }
-            #endif
 
             self.sessionID = UUID().uuidString
             self.segments.removeAll()
@@ -131,19 +152,52 @@ final class BroadcastService: NSObject, ObservableObject {
             switch await self.postStart(title: title) {
             case .success:
                 self.encoder.delegate = self
-                self.encoder.start()
+                switch self.mode {
+                case .dj:
+                    let format = self.djFeedFormat()
+                    self.encoder.startMixed(
+                        sampleRate: format.sampleRate,
+                        channels: Int(format.channelCount))
+                    self.mixedFeedOpen = true
+                case .micOnly:
+                    self.encoder.start()
+                }
                 self.state = .onAir(since: Date())
             case .failure(let message):
                 self.isBroadcasting = false
-                self.restoreSession()
+                if self.mode == .dj { self.stopDJAudio() } else { self.restoreSession() }
                 self.state = .failed(message)
             }
         }
     }
 
+    /// The engine's live render format, provided by AppServices' wiring.
+    var djFeedFormat: () -> AVAudioFormat = { AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)! }
+
+    /// The engine's broadcast tap lands here — ON THE AUDIO THREAD. Only the
+    /// (thread-safe) encoder and a benign flag are touched; no actor hop, no
+    /// allocation beyond the sample-buffer copy inside the encoder.
+    nonisolated func forwardMixed(_ buffer: AVAudioPCMBuffer, at when: AVAudioTime) {
+        guard mixedFeedOpen else { return }
+        encoder.appendMixed(buffer, at: when)
+    }
+
+    /// Mic level from the player's DJ tap (already ~10 Hz, main actor).
+    func setMicLevel(_ value: Float) {
+        guard isBroadcasting, mode == .dj else { return }
+        level = value
+    }
+
+    /// The DJ audio path died (call, media reset). End the show honestly.
+    func djAudioLost() {
+        guard isBroadcasting, mode == .dj else { return }
+        encoder(encoder, didFailWith: "DJ AUDIO LOST")
+    }
+
     func endBroadcast() {
         guard isBroadcasting else { return }
         state = .stopping
+        mixedFeedOpen = false
         encoder.stop { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -156,8 +210,14 @@ final class BroadcastService: NSObject, ObservableObject {
                 _ = await self.postStop()
                 self.isBroadcasting = false
                 self.level = 0
-                self.restoreSession()
-                self.resumeRadio()
+                switch self.mode {
+                case .dj:
+                    // The deck never stopped — just take the mic out.
+                    self.stopDJAudio()
+                case .micOnly:
+                    self.restoreSession()
+                    self.resumeRadio()
+                }
                 self.state = .idle
             }
         }
@@ -325,10 +385,20 @@ extension BroadcastService: BroadcastEncoderDelegate {
     func encoder(_ encoder: BroadcastEncoder, didFailWith message: String) {
         guard isBroadcasting || state == .starting else { return }
         isBroadcasting = false
+        mixedFeedOpen = false
         level = 0
-        restoreSession()
-        resumeRadio()
+        switch mode {
+        case .dj:
+            stopDJAudio()
+        case .micOnly:
+            restoreSession()
+            resumeRadio()
+        }
         state = .failed(message)
+        // Finalize the writer. Without this the encoder keeps a live
+        // AVAssetWriter, and because startMixed/start bail when `writer != nil`
+        // EVERY later GO LIVE would come up silently dead.
+        encoder.stop()
         // Best-effort: tell the server the show is over so no live row is left
         // stuck on with a dead stream.
         Task { @MainActor in _ = await self.postStop() }

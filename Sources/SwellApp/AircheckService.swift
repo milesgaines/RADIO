@@ -69,6 +69,10 @@ final class AircheckService: ObservableObject {
 
     func start(station: Station, now: NowPlaying?) {
         guard !isRecording else { return }
+        // The broadcast owns the main-mix tap while a show is on the air —
+        // one tap per bus, so rolling tape would tear the transmitter out and
+        // freeze every listener's playlist. Refuse rather than kill the show.
+        if player?.djModeActive == true { return }
         let name = "aircheck-\(UUID().uuidString).caf"
         let clipURL = dir.appendingPathComponent(name)
 
