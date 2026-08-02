@@ -1142,7 +1142,12 @@ public final class RadioPlayer: ObservableObject {
                 sampleRate: buffer.format.sampleRate
             )
             Task { @MainActor [weak self] in
-                guard let self, self.isPlaying else { return }
+                // Publish only when the ENGINE owns the air. When AVPlayer is
+                // driving a remote track (StreamTapContext) or a live show
+                // (synthetic pulse), this submix carries silence — node.stop()
+                // muted it — and would otherwise stomp those real levels to
+                // zero ~30×/sec, killing the meter for streamed playback.
+                guard let self, self.isPlaying, !self.streamActive else { return }
                 guard Date().timeIntervalSince(self.lastPublish) > 1.0 / 30 else { return }
                 self.lastPublish = Date()
                 self.levels = levels
@@ -1360,7 +1365,7 @@ final class StreamTapContext {
         context.width = width
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
-            clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque()),
+            clientInfo: Unmanaged.passRetained(context).toOpaque(),
             init: { _, clientInfo, tapStorageOut in
                 tapStorageOut.pointee = clientInfo!
             },

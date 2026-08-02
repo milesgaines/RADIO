@@ -34,6 +34,7 @@ final class CallBoardService: NSObject, ObservableObject {
     private let client = SupabaseClient(supabaseURL: CallBoardService.projectURL,
                                         supabaseKey: CallBoardService.publishableKey)
     private var audition: AVPlayer?
+    private var auditionEndObserver: NSObjectProtocol?
 
     /// A host device has the key; a listener never sees THE BOARD.
     var isHost: Bool { BroadcastService.isHost }
@@ -69,18 +70,26 @@ final class CallBoardService: NSObject, ObservableObject {
     func toggleAudition(_ call: Call) {
         if auditioning == call.id { stopAudition(); return }
         guard let url = call.audioURL else { return }
-        audition?.pause()
+        stopAudition()   // tear down any in-flight audition AND its end-observer
         let player = AVPlayer(url: url)
         audition = player
         auditioning = call.id
         player.play()
-        NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime,
-                                               object: player.currentItem, queue: .main) { [weak self] _ in
+        // Keep the token so stopAudition can unregister it. A block observer
+        // added per audition and never removed piles up for the service's
+        // lifetime, leaving stale registrations on deallocated player items.
+        auditionEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.stopAudition() }
         }
     }
 
     func stopAudition() {
+        if let token = auditionEndObserver {
+            NotificationCenter.default.removeObserver(token)
+            auditionEndObserver = nil
+        }
         audition?.pause()
         audition = nil
         auditioning = nil

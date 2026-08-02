@@ -148,8 +148,12 @@ final class AircheckService: ObservableObject {
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: indexKey),
               let decoded = try? JSONDecoder().decode([Aircheck].self, from: data) else { return }
-        // Drop entries whose clip file vanished but keep metadata-only cards.
-        airchecks = decoded
+        // Drop entries whose clip file vanished but keep metadata-only cards
+        // (those never wrote a file, so there's nothing to go missing).
+        airchecks = decoded.filter { ac in
+            guard let u = url(for: ac) else { return true }
+            return FileManager.default.fileExists(atPath: u.path)
+        }
     }
 
     private func save() {
