@@ -3,9 +3,10 @@ import Foundation
 /// How the station sounds.
 ///
 /// HD is the honest baseline — clean, full-range, no coloring (a stereo master
-/// heard as mastered). 3D renders that stereo bed as a wide HRTF headphone
-/// space (real binaural on headphones, a clean stereo downmix on speakers) —
-/// no room reverb, no Atmos claim it can't keep. VINYL warms it and lays real
+/// heard as mastered). 3D widens the stereo bed: local records get a real HRTF
+/// headphone space through the engine, streams get a mid/side widener in the
+/// stream tap (they play through AVPlayer, outside the engine) — either way no
+/// room reverb, no Atmos claim it can't keep. VINYL warms it and lays real
 /// surface noise under it; CASSETTE band-limits it, wobbles it, and adds tape
 /// hiss. VINYL/CASSETTE colour every path; HD/3D never add noise.
 public enum SoundMode: String, CaseIterable, Sendable {

@@ -120,6 +120,10 @@ public final class RadioPlayer: ObservableObject {
     private var syntheticLevelsTask: Task<Void, Never>?
     /// AVPlayer currently owns the air (a remote track or a live show).
     private var streamActive: Bool { avPlayer?.currentItem != nil }
+    /// The live stream tap's context, retained so a mode change can push a new
+    /// stereo width to the running stream. Non-nil only while AVPlayer owns the
+    /// air with a progressive (tappable) item; nil for engine playback and HLS.
+    private var streamTapContext: StreamTapContext?
 
     public init(stream: LiveStreamService) {
         self.stream = stream
@@ -246,6 +250,7 @@ public final class RadioPlayer: ObservableObject {
         // underneath the local file.
         avPlayer?.pause()
         avPlayer?.replaceCurrentItem(with: nil)
+        streamTapContext = nil   // the tap died with the item; engine owns width now
         loadLocal(np, from: url)
         refreshDJFeedTruth()       // engine record: music is in the feed again
     }
@@ -282,11 +287,11 @@ public final class RadioPlayer: ObservableObject {
         Task { @MainActor [weak self] in
             // Attach the FFT tap BEFORE the item goes live — swapping an
             // audioMix mid-playback glitches. (Progressive files only; HLS
-            // never vends tap buffers, which goLive covers separately.)
+            // never vends tap buffers, which goLive covers separately.) The
+            // same tap carries the SPATIAL widener, seeded from the current mode.
             if let tracks = try? await asset.loadTracks(withMediaType: .audio),
-               let track = tracks.first {
-                let params = AVMutableAudioMixInputParameters(track: track)
-                params.audioTapProcessor = StreamTapContext.makeTap { [weak self] levels in
+               let track = tracks.first, let self {
+                let made = StreamTapContext.makeTap(width: self.streamWidth(for: self.mode)) { [weak self] levels in
                     Task { @MainActor [weak self] in
                         guard let self, self.isPlaying else { return }
                         guard Date().timeIntervalSince(self.lastPublish) > 1.0 / 30 else { return }
@@ -294,9 +299,14 @@ public final class RadioPlayer: ObservableObject {
                         self.levels = levels
                     }
                 }
-                let mix = AVMutableAudioMix()
-                mix.inputParameters = [params]
-                item.audioMix = mix
+                if let made {
+                    self.streamTapContext = made.context
+                    let params = AVMutableAudioMixInputParameters(track: track)
+                    params.audioTapProcessor = made.tap
+                    let mix = AVMutableAudioMix()
+                    mix.inputParameters = [params]
+                    item.audioMix = mix
+                }
             }
             guard let self, self.loadedKey == key else { return } // stale: retuned
             player.replaceCurrentItem(with: item)
@@ -365,6 +375,7 @@ public final class RadioPlayer: ObservableObject {
         liveTitle = title
         liveURL = url
         loadedKey = nil
+        streamTapContext = nil   // HLS vends no tap; no progressive stream to widen
         node.stop()
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
@@ -537,6 +548,7 @@ public final class RadioPlayer: ObservableObject {
         UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)
         applyModeEQ()
         applySpatialMode()       // 3D on for SPATIAL, transparent for vinyl/cassette
+        streamTapContext?.width = streamWidth(for: newMode)  // and 3D on a live stream
         ambience.stop()          // clears the old loop
         ensureAmbience()         // schedules the new one if this mode has it
         startWowFlutter()        // and retune the wow/flutter depth (0 for SPATIAL)
@@ -646,6 +658,15 @@ public final class RadioPlayer: ObservableObject {
             spatialSource.reverbBlend = 0
             environment.reverbParameters.enable = false
         }
+    }
+
+    /// Streams play through AVPlayer, outside the engine, so they never reach
+    /// the HRTF environment above. SPATIAL reaches them through a mid/side
+    /// widener living in the stream tap instead. Only SPATIAL widens; every
+    /// other mode stays neutral (1.0), so the stream is bit-exact off SPATIAL.
+    private static let spatialStreamWidth: Float = 1.6
+    private func streamWidth(for mode: SoundMode) -> Float {
+        mode == .spatial ? Self.spatialStreamWidth : 1.0
     }
 
     /// Start (or keep) the surface-noise loop for the current mode. Runs the
@@ -1068,6 +1089,7 @@ public final class RadioPlayer: ObservableObject {
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
         avPlayer = nil
+        streamTapContext = nil   // died with the player; load() rebuilds it per stream
         configureAudioSession()
         if wasPlaying {
             if isLive, let url = liveURL {
@@ -1317,6 +1339,11 @@ final class StreamTapContext {
     private var channels: Int = 2
     private var interleaved = false
     private var scratch = [Float](repeating: 0, count: 4096)
+    /// Stereo width for SPATIAL on streams (see RadioPlayer.streamWidth). 1.0 =
+    /// neutral, bit-exact passthrough; > 1.0 widens via mid/side. Written from
+    /// the main actor on a mode change, read here on the audio thread — a single
+    /// aligned Float, so the worst a torn read can do is colour one buffer.
+    var width: Float = 1.0
 
     private init(onLevels: @escaping (AudioLevels) -> Void) {
         self.onLevels = onLevels
@@ -1325,8 +1352,12 @@ final class StreamTapContext {
     /// Build a tap ready to assign to `AVMutableAudioMixInputParameters
     /// .audioTapProcessor`. Returns nil if MediaToolbox refuses (playback
     /// then simply runs without live analysis — never blocked on visuals).
-    static func makeTap(onLevels: @escaping (AudioLevels) -> Void) -> MTAudioProcessingTap? {
+    static func makeTap(
+        width: Float,
+        onLevels: @escaping (AudioLevels) -> Void
+    ) -> (tap: MTAudioProcessingTap, context: StreamTapContext)? {
         let context = StreamTapContext(onLevels: onLevels)
+        context.width = width
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque()),
@@ -1360,7 +1391,7 @@ final class StreamTapContext {
             kCFAllocatorDefault, &callbacks,
             kMTAudioProcessingTapCreationFlag_PostEffects, &tapOut
         ) == noErr, let tap = tapOut else { return nil }
-        return tap
+        return (tap, context)
     }
 
     /// Audio-thread hot path — allocation-free (scratch is preallocated).
@@ -1384,6 +1415,43 @@ final class StreamTapContext {
             levels = analyzer.analyze(floats, count: totalFloats, sampleRate: sampleRate)
         }
         onLevels(levels)
+        widen(abl)   // 3D width for the stream, in place — SPATIAL only, after analysis
+    }
+
+    /// Mid/side stereo widening, applied in place on the audio thread so the
+    /// widened signal is what the DAC plays. Streams bypass the engine's HRTF
+    /// environment, so this is how SPATIAL reaches them. Neutral width (1.0) and
+    /// mono are no-ops — HD/vinyl/cassette stay bit-exact and pay nothing. The
+    /// result is hard-clamped to [-1, 1] so widening a hot master can't wrap.
+    /// Runs AFTER analysis so the plate still reads the true (unwidened) master.
+    private func widen(_ abl: UnsafeMutableAudioBufferListPointer) {
+        let w = width
+        guard w > 1.0001, channels >= 2 else { return }
+        if interleaved {
+            guard let first = abl.first, let data = first.mData else { return }
+            let f = data.assumingMemoryBound(to: Float.self)
+            let frames = Int(first.mDataByteSize) / MemoryLayout<Float>.size / channels
+            for i in 0..<frames {
+                let base = i * channels
+                let mid = (f[base] + f[base + 1]) * 0.5
+                let side = (f[base] - f[base + 1]) * 0.5 * w
+                f[base]     = min(1, max(-1, mid + side))
+                f[base + 1] = min(1, max(-1, mid - side))
+            }
+        } else {
+            guard abl.count >= 2,
+                  let lData = abl[0].mData, let rData = abl[1].mData else { return }
+            let l = lData.assumingMemoryBound(to: Float.self)
+            let r = rData.assumingMemoryBound(to: Float.self)
+            let frames = min(Int(abl[0].mDataByteSize), Int(abl[1].mDataByteSize))
+                / MemoryLayout<Float>.size
+            for i in 0..<frames {
+                let mid = (l[i] + r[i]) * 0.5
+                let side = (l[i] - r[i]) * 0.5 * w
+                l[i] = min(1, max(-1, mid + side))
+                r[i] = min(1, max(-1, mid - side))
+            }
+        }
     }
 }
 #endif
