@@ -35,7 +35,9 @@ final class TheReadService: ObservableObject {
     let markets = Market.seeded
 
     private let monitor: ResonanceMonitor
-    private let bias: MarketResonanceSource = SeededMarketBias()
+    // Per-market divergence is intentionally NOT applied: a real geo split
+    // needs geo-tagged votes (arrives with the A&R-brain backend). Until then
+    // THE READ shows the ONE real room — no seeded/simulated market numbers.
     private var ticker: Timer?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -79,41 +81,32 @@ final class TheReadService: ObservableObject {
     }
 
     private func remap() {
-        let adjusted = monitor.readout
-            .map { r -> (TrackResonance, Double) in
-                let marketRes = max(-1, min(1, r.resonance * bias.bias(market: market, trackID: r.trackID)))
-                return (r, marketRes)
-            }
-            .sorted { $0.1 > $1.1 }
-
-        readouts = adjusted.enumerated().map { i, pair in
-            let (r, marketRes) = pair
-            return TrackReadout(
+        let sorted = monitor.readout.sorted { $0.resonance > $1.resonance }
+        readouts = sorted.enumerated().map { i, r in
+            TrackReadout(
                 id: r.trackID, rank: i + 1, title: r.title, artist: r.artist,
-                resonance01: (marketRes + 1) / 2,
+                resonance01: (r.resonance + 1) / 2,   // REAL resonance, no market bias
                 status: r.status, trend: r.trend,
                 velocity: r.velocity, density: r.density, retention: r.retention,
-                arLine: Self.arLine(for: r, marketRes: marketRes, market: market)
+                arLine: Self.arLine(for: r)
             )
         }
         hasBreaking = readouts.contains { $0.status == .breaking }
         updatedAt = Date()
     }
 
-    /// A deterministic, plain-English A&R read. Labeled GENERATED in the UI.
-    private static func arLine(for r: TrackResonance, marketRes: Double, market: Market) -> String {
-        let pct = Int((abs(marketRes) * 100).rounded())
+    /// A deterministic, plain-English read of the LIVE room. Labeled A&R in the
+    /// UI. Describes only real status/trend — no invented percentages.
+    private static func arLine(for r: TrackResonance) -> String {
         switch r.status {
         case .breaking:
-            return "Breaking in \(market.code) — \(pct)% over the room. Push it."
+            return "Breaking with the room — the momentum is real. Push it."
         case .inRotation:
-            return r.trend == .up
-                ? "Climbing in \(market.code). Hold the slot."
-                : "Holding steady in \(market.code)."
+            return r.trend == .up ? "Climbing. Hold the slot." : "Holding steady in rotation."
         case .cooling:
-            return "Cooling in \(market.code) — the room is drifting."
+            return "Cooling — the room is drifting off it."
         case .benched:
-            return "Not landing in \(market.code) — dropped out until it recovers."
+            return "Not landing — dropped out of rotation until it recovers."
         }
     }
 }

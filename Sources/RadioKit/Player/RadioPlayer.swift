@@ -872,6 +872,10 @@ public final class RadioPlayer: ObservableObject {
         #endif
     }
 
+    /// System-surface boost (lock screen / Siri / "I like this"). AppServices
+    /// wires this to cast a real, server-recorded vote for the current track.
+    public var onBoostCommand: (() -> Void)?
+
     private func configureRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
 
@@ -888,12 +892,16 @@ public final class RadioPlayer: ObservableObject {
         center.nextTrackCommand.isEnabled = false
         center.previousTrackCommand.isEnabled = false
 
-        // The in-car "boost" affordance.
+        // The in-car / lock-screen / Siri "boost" affordance. Routes through
+        // onBoostCommand (wired by AppServices) so it casts a REAL server vote
+        // like every other boost — not a local-only vanity bump. Falls back to
+        // the local tally only if nothing is wired.
         center.likeCommand.isEnabled = true
         center.likeCommand.localizedTitle = "Boost"
         center.likeCommand.addTarget { [weak self] _ in
-            self?.stream.boostCurrent()
-            self?.refreshNowPlayingInfo()
+            guard let self else { return .commandFailed }
+            if let hook = self.onBoostCommand { hook() } else { self.stream.boostCurrent() }
+            self.refreshNowPlayingInfo()
             return .success
         }
     }

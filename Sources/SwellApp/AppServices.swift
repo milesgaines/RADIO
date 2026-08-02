@@ -176,6 +176,13 @@ final class AppServices: ObservableObject {
         }
         broadcast.resumeRadio = { [weak self] in self?.player.play() }
 
+        // Lock-screen / Siri "Boost" casts a REAL server vote (same path as the
+        // CarPlay button), not a local-only bump — "real numbers only".
+        player.onBoostCommand = { [weak self] in
+            guard let self, let id = self.activeStream.nowPlaying?.track.id else { return }
+            self.castMyVote(.boost, on: id)
+        }
+
         // Listening tenure accrues while playback runs...
         player.$isPlaying
             .removeDuplicates()
@@ -300,10 +307,10 @@ final class AppServices: ObservableObject {
                     "Unreleased mixes, straight from the crates.",
                     dial: "78", unit: "RPM", vault),
             station(FolderCatalog.stableID("station:the algo"), "The Underground",
-                    "The OneSync roster — the crowd breaks records here.",
+                    "Deep in the crates — the crowd breaks records here.",
                     dial: "1200", underground),
             station(FolderCatalog.stableID("station:the wave"), "The Wave",
-                    "Trending across the open web, right now.",
+                    "Rising with the room, right now.",
                     dial: "247", wave),
         ]
     }

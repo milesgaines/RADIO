@@ -25,12 +25,19 @@ struct TheReadSheet: View {
 
             VStack(spacing: 0) {
                 header
-                marketBar
-                Text("MARKETS SEEDED LOCALLY · GEO BACKEND PENDING")
-                    .font(.custom("Archivo Black", size: 8))
-                    .tracking(1.1)
-                    .foregroundStyle(bone.opacity(0.3))
-                    .padding(.top, 8).padding(.bottom, 12)
+                // Honest state: one real room. The per-market lens returns
+                // when geo-tagged votes exist — no seeded market numbers shown.
+                HStack(spacing: 6) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(accent.opacity(0.8))
+                    Text("ONE LIVE ROOM · PER-MARKET ARRIVES WITH GEO-TAGGED VOTES")
+                        .font(.custom("Archivo Black", size: 8.5))
+                        .tracking(0.9)
+                        .foregroundStyle(bone.opacity(0.55))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6).padding(.bottom, 12)
                 Rectangle().fill(bone.opacity(0.15)).frame(height: 1)
 
                 if service.readouts.isEmpty {
@@ -76,38 +83,6 @@ struct TheReadSheet: View {
         }
         .padding(.top, 18)
         .padding(.bottom, 14)
-    }
-
-    // MARK: Market selector
-
-    private var marketBar: some View {
-        HStack(spacing: 6) {
-            ForEach(service.markets) { m in
-                let selected = m == service.market
-                Button {
-                    service.select(m)
-                    Haptics.detent()
-                } label: {
-                    Text(m.code)
-                        .font(.custom("Archivo Black", size: 13))
-                        .tracking(1)
-                        .foregroundStyle(selected ? ink : bone.opacity(0.8))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 34)
-                        .background(
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(selected
-                                      ? LinearGradient(colors: [accent, accent.opacity(0.85)],
-                                                       startPoint: .top, endPoint: .bottom)
-                                      : LinearGradient(colors: [bone.opacity(0.06), bone.opacity(0.03)],
-                                                       startPoint: .top, endPoint: .bottom))
-                                .overlay(RoundedRectangle(cornerRadius: 3)
-                                    .strokeBorder(selected ? .clear : bone.opacity(0.14), lineWidth: 1))
-                        )
-                }
-                .buttonStyle(PressKey())
-            }
-        }
     }
 
     // MARK: Empty state
