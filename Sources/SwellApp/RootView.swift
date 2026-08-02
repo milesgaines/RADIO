@@ -34,6 +34,7 @@ private struct PlateView: View {
 
     @State private var plate = CymaticPlate()
     @State private var showProfile = false
+    @State private var showDial = false
     @State private var showRing = false
     @State private var showCallIn = false
     @State private var showBroadcast = false
@@ -219,6 +220,15 @@ private struct PlateView: View {
                     .transition(.opacity)
                     .zIndex(3)
                 }
+            }
+            .sheet(isPresented: $showDial) {
+                TheDialSheet(
+                    streams: services.streams,
+                    activeID: stream.station.id,
+                    accent: accent,
+                    onTune: { services.tune(to: $0) },
+                    onClose: { showDial = false }
+                )
             }
             .sheet(isPresented: $showProfile) {
                 ProfileSheet(stream: stream, accent: accent, onOpenRing: {
@@ -458,23 +468,24 @@ private struct PlateView: View {
                     Image(systemName: "opticaldisc")
                         .foregroundStyle(player.mode == .hd || player.mode == .spatial ? bone.opacity(0.9) : accent)
                 }
-                // THE RING: song battles.
-                barButton("RING") { showRing = true } label: {
+                // THE RING: song battles. Bar label says what it IS — the
+                // brand name stays on the sheet header inside.
+                barButton("BATTLE") { showRing = true } label: {
                     Text("VS")
                         .font(.custom("Archivo Black", size: 14))
                         .foregroundStyle(bone.opacity(0.9))
                 }
                 // THE LINE: hold-to-talk call-ins.
-                barButton("LINE") { showCallIn = true } label: {
+                barButton("CALL") { showCallIn = true } label: {
                     Image(systemName: "phone.fill").foregroundStyle(bone.opacity(0.9))
                 }
-                // TAPE: hit record — tape the moment off the air (#30).
-                barButton("TAPE") { showAircheck = true } label: {
+                // AIRCHECK: hit record — tape the moment off the air (#30).
+                barButton("REC") { showAircheck = true } label: {
                     Image(systemName: services.aircheck.isRecording ? "record.circle.fill" : "recordingtape")
                         .foregroundStyle(services.aircheck.isRecording ? Color(red: 1, green: 0.32, blue: 0.28) : bone.opacity(0.9))
                 }
-                // READ: live audience research — what's resonating, per market.
-                barButton("READ") { showRead = true } label: {
+                // THE READ: live audience research — what's resonating.
+                barButton("STATS") { showRead = true } label: {
                     Image(systemName: "chart.bar.xaxis")
                         .foregroundStyle(services.theRead.hasBreaking ? accent : bone.opacity(0.9))
                 }
@@ -555,11 +566,22 @@ private struct PlateView: View {
                                 .animation(.snappy, value: np.boostScore)
                         }
                     }
+                    // THE DIAL door — the lineup card. The chip makes the
+                    // whole marquee band read as tappable (it is).
+                    Text("DIAL ▾")
+                        .font(.custom("Archivo Black", size: 10)).tracking(1.2)
+                        .foregroundStyle(bone.opacity(0.6))
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .overlay(Capsule().strokeBorder(bone.opacity(0.25), lineWidth: 1))
                 }
                 .padding(.vertical, 14)
                 emberRule
             }
-            .allowsHitTesting(false)
+            // The band is the door to THE DIAL: a deliberate tap opens the
+            // lineup; a drag that merely starts here is a small loss (the
+            // whole plate above still tunes) for a discoverability win.
+            .contentShape(Rectangle())
+            .onTapGesture { showDial = true }
 
             ControlDeck(stream: stream, accent: accent, onTune: { direction in
                 tune(direction)
