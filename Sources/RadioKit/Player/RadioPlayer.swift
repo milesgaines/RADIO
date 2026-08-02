@@ -470,24 +470,30 @@ public final class RadioPlayer: ObservableObject {
     private func reconnectIfNeeded(format: AVAudioFormat) {
         guard currentFormat?.sampleRate != format.sampleRate
             || currentFormat?.channelCount != format.channelCount else { return }
-        // THE station-switch crash: reconnecting node→eq→musicMixer while
-        // musicMixer still carries the analysis tap AND the engine is rendering
-        // makes AVAudioEngineGraph::UpdateGraphAfterReconfig throw an
-        // uncatchable ObjC exception (SIGABRT) from inside `engine.connect`.
-        // Fully quiesce before rewiring: stop the source, pull the tap, pause
-        // the engine. Then restore — pause (not stop) preserves the ambience
-        // loop and the session, and loadLocal restarts the player right after.
+        // THE station/track-switch crash (hit whenever rotation crosses a
+        // sample-rate boundary, e.g. the one 44.1 kHz master in a 48 kHz
+        // catalog): calling `engine.connect` on an initialized engine — even a
+        // PAUSED one — triggers AVAudioEngineGraph::UpdateGraphAfterReconfig,
+        // which re-propagates the new rate down the live spatial tail
+        // (wowFlutter → spatialSource → environment) and throws an uncatchable
+        // NSException. The only safe rewire is on a fully STOPPED engine:
+        // connects then defer graph building to the next start().
         node.stop()
         let hadTap = tapInstalled
         if hadTap { musicMixer.removeTap(onBus: 0); tapInstalled = false }
         let wasRunning = engine.isRunning
-        if wasRunning { engine.pause() }
+        ambience.stop()          // its schedule dies with the stop; re-armed below
+        engine.stop()
         engine.disconnectNodeOutput(node)
         engine.disconnectNodeOutput(eq)
         engine.connect(node, to: eq, format: format)
         engine.connect(eq, to: musicMixer, format: format)
         currentFormat = format
-        if wasRunning { engine.prepare(); try? engine.start() }
+        if wasRunning {
+            engine.prepare()
+            try? engine.start()
+            ensureAmbience()     // reschedule the surface-noise loop if this mode has one
+        }
         if hadTap { installTapIfNeeded() }
     }
 
