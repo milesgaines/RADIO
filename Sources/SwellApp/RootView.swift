@@ -36,6 +36,7 @@ private struct PlateView: View {
     @State private var showProfile = false
     @State private var showDial = false
     @State private var showSleep = false
+    @State private var showShows = false
     @State private var showRing = false
     @State private var showCallIn = false
     @State private var showBroadcast = false
@@ -238,6 +239,15 @@ private struct PlateView: View {
                     accent: accent,
                     dial: dialLabel.number,
                     onClose: { showSleep = false }
+                )
+            }
+            .sheet(isPresented: $showShows) {
+                ShowsSheet(
+                    stream: stream,
+                    player: player,
+                    accent: accent,
+                    onHostAccess: { showShows = false; showHostKey = true },
+                    onClose: { showShows = false }
                 )
             }
             .sheet(isPresented: $showProfile) {
@@ -576,6 +586,19 @@ private struct PlateView: View {
                                 .animation(.snappy, value: np.boostScore)
                         }
                     }
+                    // SHOWS — live radio's visible door: who's on air, the
+                    // taped archive, host access. A Button, so its tap wins
+                    // over the band's DIAL gesture.
+                    Button { showShows = true } label: {
+                        Text("SHOWS")
+                            .font(.custom("Archivo Black", size: 10)).tracking(1.2)
+                            .foregroundStyle(player.isLive ? accent : bone.opacity(0.6))
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .overlay(Capsule().strokeBorder(
+                                (player.isLive ? accent : bone).opacity(player.isLive ? 0.6 : 0.25),
+                                lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
                     // THE DIAL door — the lineup card. The chip makes the
                     // whole marquee band read as tappable (it is).
                     Text("DIAL ▾")
