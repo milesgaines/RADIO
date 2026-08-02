@@ -18,19 +18,25 @@ UNDERGROUND = "ba13d3b9-a9c7-807d-b73b-065938f474b5"
 station = sys.argv[1] if len(sys.argv) > 1 else UNDERGROUND
 limit_total = int(sys.argv[2]) if len(sys.argv) > 2 else 200
 
-# Trending sweeps that fit RADI0's lean, plus underground for depth. Invalid
-# genres just return fewer rows — harmless.
+# DJ-culture sweeps: Audius is an open DJ-edit platform, so lead with the
+# edit/flip/club searches (recognizable, mainstream-flavored) and back it with
+# trending for depth. Search + trending both return {"data":[...]}.
 SWEEPS = [
+    ("/v1/tracks/search", {"query": "jersey club"}),
+    ("/v1/tracks/search", {"query": "dj edit"}),
+    ("/v1/tracks/search", {"query": "flip"}),
+    ("/v1/tracks/search", {"query": "mashup"}),
+    ("/v1/tracks/search", {"query": "sped up"}),
+    ("/v1/tracks/search", {"query": "remix"}),
+    ("/v1/tracks/search", {"query": "blend transition"}),
+    ("/v1/tracks/search", {"query": "club edit"}),
+    ("/v1/tracks/search", {"query": "baile funk"}),
+    ("/v1/tracks/search", {"query": "amapiano"}),
     ("/v1/tracks/trending/underground", {}),
     ("/v1/tracks/trending", {"genre": "Hip-Hop/Rap", "time": "week"}),
     ("/v1/tracks/trending", {"genre": "Electronic", "time": "week"}),
     ("/v1/tracks/trending", {"genre": "Trap", "time": "week"}),
-    ("/v1/tracks/trending", {"genre": "R&B/Soul", "time": "week"}),
-    ("/v1/tracks/trending", {"genre": "Pop", "time": "week"}),
-    ("/v1/tracks/trending", {"genre": "Dubstep", "time": "week"}),
     ("/v1/tracks/trending", {"genre": "House", "time": "week"}),
-    ("/v1/tracks/trending", {"genre": "Hip-Hop/Rap", "time": "month"}),
-    ("/v1/tracks/trending", {"genre": "Electronic", "time": "month"}),
 ]
 
 
