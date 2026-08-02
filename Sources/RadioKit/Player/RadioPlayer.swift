@@ -5,6 +5,9 @@ import MediaPlayer
 import MediaToolbox
 import Accelerate
 import Combine
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// What the music is doing *right now*, measured from the actual output
 /// buffers — not simulated. Every field is auto-gained to 0…1 against a
@@ -1202,13 +1205,32 @@ public final class RadioPlayer: ObservableObject {
     }
 
     /// Push current-track metadata (and live boost score) to the system.
+    /// Artwork for the system "away" surfaces — lock screen, StandBy, CarPlay
+    /// Now Playing. The app layer resolves the right image (real cover art or
+    /// the station's branded plate) and hands it down; every info refresh
+    /// re-merges it so the art survives track/metadata churn.
+    private var nowPlayingArtwork: MPMediaItemArtwork?
+    public func setNowPlayingArtwork(image: CGImage?, size: CGSize) {
+        #if canImport(UIKit)
+        if let image {
+            let ui = UIImage(cgImage: image)
+            nowPlayingArtwork = MPMediaItemArtwork(boundsSize: size) { _ in ui }
+        } else {
+            nowPlayingArtwork = nil
+        }
+        refreshNowPlayingInfo()
+        #endif
+    }
+
     public func refreshNowPlayingInfo() {
         if isLive {
-            MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+            var info: [String: Any] = [
                 MPMediaItemPropertyTitle: liveTitle.isEmpty ? "LIVE" : liveTitle,
                 MPMediaItemPropertyArtist: stream.station.name,
                 MPNowPlayingInfoPropertyIsLiveStream: true,
             ]
+            if let art = nowPlayingArtwork { info[MPMediaItemPropertyArtwork] = art }
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
             MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
             return
         }
@@ -1223,6 +1245,7 @@ public final class RadioPlayer: ObservableObject {
         if let album = np.track.albumTitle {
             info[MPMediaItemPropertyAlbumTitle] = album
         }
+        if let art = nowPlayingArtwork { info[MPMediaItemPropertyArtwork] = art }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
     }

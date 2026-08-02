@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import Combine
+import UIKit
 import RadioKit
 
 /// Single source of truth shared by the phone scene and the CarPlay scene.
@@ -33,6 +34,8 @@ final class AppServices: ObservableObject {
     /// THE READ — live audience research ("PPM for music"): per-record
     /// resonance, per-market, that also drops records in and out of rotation.
     let theRead: TheReadService
+    /// Artwork for the away surfaces — lock screen / StandBy / CarPlay.
+    let artwork = ArtworkService()
     /// The real numbers: presence + votes over Supabase realtime.
     private let backend: RadioBackend
 
@@ -232,6 +235,41 @@ final class AppServices: ObservableObject {
         AuthService.shared.configure { [weak self] appleUserID, _ in
             self?.backend.adoptIdentity(appleUserID)
         }
+
+        observeArtwork()
+    }
+
+    /// Keep the system "away" surfaces (lock screen, StandBy, CarPlay) dressed:
+    /// the station's branded plate lands INSTANTLY on every tune/track change,
+    /// then upgrades to the record's real cover art when one can be found.
+    private func observeArtwork() {
+        $activeStream
+            .map { stream in stream.$nowPlaying.map { np in (stream, np?.track) } }
+            .switchToLatest()
+            .removeDuplicates(by: { $0.1?.id == $1.1?.id && $0.0 === $1.0 })
+            .receive(on: RunLoop.main)
+            .sink { [weak self] stream, track in
+                guard let self else { return }
+                let station = stream.station
+                let index = self.streams.firstIndex(where: { $0 === stream }) ?? 0
+                // 1) The plate, immediately — the lock screen is never bare.
+                self.push(self.artwork.plate(for: station, accentIndex: index))
+                // 2) The record's own cover, if one can be found and we're
+                // still on the same song by the time it arrives.
+                guard let track else { return }
+                Task { @MainActor [weak self] in
+                    guard let self, let cover = await self.artwork.cover(for: track) else { return }
+                    guard self.activeStream === stream,
+                          self.activeStream.nowPlaying?.track.id == track.id else { return }
+                    self.push(cover)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func push(_ image: UIImage) {
+        guard let cg = image.cgImage else { return }
+        player.setNowPlayingArtwork(image: cg, size: image.size)
     }
 
     /// The stream owning a backend event, matched case-insensitively — the

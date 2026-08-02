@@ -35,6 +35,7 @@ private struct PlateView: View {
     @State private var plate = CymaticPlate()
     @State private var showProfile = false
     @State private var showDial = false
+    @State private var showSleep = false
     @State private var showRing = false
     @State private var showCallIn = false
     @State private var showBroadcast = false
@@ -228,6 +229,15 @@ private struct PlateView: View {
                     accent: accent,
                     onTune: { services.tune(to: $0) },
                     onClose: { showDial = false }
+                )
+            }
+            .fullScreenCover(isPresented: $showSleep) {
+                SleepScreen(
+                    stream: stream,
+                    player: player,
+                    accent: accent,
+                    dial: dialLabel.number,
+                    onClose: { showSleep = false }
                 )
             }
             .sheet(isPresented: $showProfile) {
@@ -587,6 +597,8 @@ private struct PlateView: View {
                 tune(direction)
             }, onDedicate: {
                 withAnimation(.easeIn(duration: 0.2)) { dedicating = true }
+            }, onSleep: {
+                showSleep = true
             })
             .frame(maxWidth: .infinity)
             .padding(.top, 20)

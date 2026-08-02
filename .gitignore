@@ -20,6 +20,7 @@ xcuserdata/
 *.mobileprovision
 *.p12
 secrets.xcconfig
+supabase/seed-mux-secrets.sql
 
 # Licensed masters live here locally but never enter the repo
 RealAudio/*

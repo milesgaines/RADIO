@@ -85,6 +85,13 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Sources/SwellApp/Swell.entitlements
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      # Debug builds (simulator dev) carry the CarPlay entitlement so the
+      # CarPlay sim window shows the app; Release keeps the stripped file —
+      # the Apple-managed grant is still pending and cloud signing fails
+      # if it ships. See Swell.debug.entitlements.
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: Sources/SwellApp/Swell.debug.entitlements
 
   RadioKitTests:
     type: bundle.unit-test

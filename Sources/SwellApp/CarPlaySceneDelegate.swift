@@ -60,12 +60,21 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             let station = stream.station
             let listeners = stream.nowPlaying?.liveListeners ?? 1
             let accent = Self.accents[idx % Self.accents.count]
-            let detail = station.isFlagship
-                ? "◉ 24/7 FLAGSHIP · \(listeners) live"
-                : "\(listeners) live · \(station.tagline)"
+            // What's ON each station leads its detail line — the car list
+            // doubles as a dial-wide now-playing board.
+            let onAir = stream.nowPlaying.map { "● \($0.track.title) — \($0.track.artistName)" }
+            let detail: String
+            if station.isFlagship {
+                detail = ([onAir, "24/7 · \(listeners) live"].compactMap { $0 })
+                    .joined(separator: "  ·  ")
+            } else {
+                detail = onAir ?? "\(listeners) live · \(station.tagline)"
+            }
             let title = station.dial.isEmpty ? station.name : "\(station.dial)  ·  \(station.name)"
             let item = CPListItem(text: title, detailText: detail)
-            item.setImage(Self.dialTile(dial: station.dial, color: accent))
+            // The extruded plate tile — the phone SIGN's look at glove-box
+            // size, so the dial reads instantly from the driver's seat.
+            item.setImage(StationArt.carTile(dial: station.dial, accent: accent, size: 120))
             item.handler = { [weak self] _, completion in
                 AppServices.shared.tune(to: station)
                 AppServices.shared.player.play()
@@ -75,27 +84,6 @@ final class CarPlaySceneDelegate: UIResponder, CPTemplateApplicationSceneDelegat
             return item
         }
         return CPListSection(items: items)
-    }
-
-    /// A little dial tile — dark rounded chip, accent ring, the call number —
-    /// so the four stations are instantly distinct in the car list.
-    private static func dialTile(dial: String, color: UIColor) -> UIImage {
-        let size = CGSize(width: 96, height: 96)
-        return UIGraphicsImageRenderer(size: size).image { _ in
-            let rect = CGRect(origin: .zero, size: size)
-            UIColor(white: 0.07, alpha: 1).setFill()
-            UIBezierPath(roundedRect: rect, cornerRadius: 20).fill()
-            let ring = UIBezierPath(roundedRect: rect.insetBy(dx: 4, dy: 4), cornerRadius: 17)
-            color.setStroke(); ring.lineWidth = 3; ring.stroke()
-            let text = (dial.isEmpty ? "808" : dial) as NSString
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: text.length > 3 ? 24 : 33, weight: .heavy),
-                .foregroundColor: UIColor(white: 0.96, alpha: 1),
-            ]
-            let b = text.size(withAttributes: attrs)
-            text.draw(at: CGPoint(x: (size.width - b.width) / 2, y: (size.height - b.height) / 2),
-                      withAttributes: attrs)
-        }
     }
 
     private func pushNowPlaying() {

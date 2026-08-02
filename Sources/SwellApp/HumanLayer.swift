@@ -156,6 +156,7 @@ struct ControlDeck: View {
     let accent: Color
     let onTune: (Int) -> Void
     var onDedicate: () -> Void = {}
+    var onSleep: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 12) {
@@ -243,6 +244,18 @@ struct ControlDeck: View {
             Text("BURY").font(.custom("Archivo Black", size: 9)).tracking(1).foregroundStyle(HumanTheme.dim)
             Text("— YOU PROGRAM THE STATION").font(.custom("Archivo Black", size: 9)).tracking(0.6)
                 .foregroundStyle(HumanTheme.dim.opacity(0.8))
+            Spacer(minLength: 8)
+            // The night-stand door: clock, low ember, sleep timer.
+            Button(action: onSleep) {
+                HStack(spacing: 4) {
+                    Image(systemName: "moon.fill").font(.system(size: 8, weight: .heavy))
+                    Text("SLEEP").font(.custom("Archivo Black", size: 9)).tracking(1)
+                }
+                .foregroundStyle(HumanTheme.dim)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .overlay(Capsule().strokeBorder(HumanTheme.dim.opacity(0.35), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
         }
         .lineLimit(1).minimumScaleFactor(0.7)
         }
