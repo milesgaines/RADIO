@@ -450,10 +450,12 @@ private struct PlateView: View {
                             .foregroundStyle(broadcasting ? accent : bone.opacity(0.9))
                     }
                 }
-                // SOUND: spatial / vinyl / cassette — how the station sounds.
+                // SOUND: HD / 3D / vinyl / cassette — how the station sounds.
+                // Neutral for the uncoloured modes (HD, 3D); accent-lit when a
+                // character mode (vinyl/cassette) is colouring the air.
                 barButton("SOUND") { showSound = true } label: {
                     Image(systemName: "opticaldisc")
-                        .foregroundStyle(player.mode == .spatial ? bone.opacity(0.9) : accent)
+                        .foregroundStyle(player.mode == .hd || player.mode == .spatial ? bone.opacity(0.9) : accent)
                 }
                 // THE RING: song battles.
                 barButton("RING") { showRing = true } label: {

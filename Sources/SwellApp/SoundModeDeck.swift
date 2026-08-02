@@ -120,6 +120,7 @@ private struct SoundDevice: View {
             let t = ctx.date.timeIntervalSinceReferenceDate
             Canvas { g, size in
                 switch mode {
+                case .hd: drawHD(g, size, t)
                 case .vinyl: drawRecord(g, size, t)
                 case .cassette: drawCassette(g, size, t)
                 case .spatial: drawSpatial(g, size, t)
@@ -129,6 +130,28 @@ private struct SoundDevice: View {
     }
 
     private var bone: Color { Color(red: 0.945, green: 0.925, blue: 0.878) }
+
+    // HD: the master, uncoloured. A crisp full-range waveform inside a clean
+    // ring — no device, no artifact. It breathes with the music's level.
+    private func drawHD(_ g: GraphicsContext, _ size: CGSize, _ t: Double) {
+        let c = CGPoint(x: size.width / 2, y: size.height / 2)
+        let r = min(size.width, size.height) / 2 - 2
+        g.stroke(Path(ellipseIn: CGRect(x: c.x - r, y: c.y - r, width: r * 2, height: r * 2)),
+                 with: .color(bone.opacity(0.18)), lineWidth: 1)
+        let amp = r * 0.55 * CGFloat(0.30 + 0.70 * min(1, level * 1.4))
+        var wave = Path()
+        let steps = 72
+        for i in 0...steps {
+            let f = Double(i) / Double(steps)
+            let x = c.x - r + CGFloat(f) * r * 2
+            let phase = f * .pi * 4 + (spinning ? t * 3 : 0)
+            let env = sin(f * .pi)                     // fade to nothing at the disc edge
+            let y = c.y + CGFloat((sin(phase) * 0.7 + sin(phase * 2) * 0.3) * env) * amp
+            if i == 0 { wave.move(to: CGPoint(x: x, y: y)) } else { wave.addLine(to: CGPoint(x: x, y: y)) }
+        }
+        g.stroke(wave, with: .color(bone.opacity(0.9)), lineWidth: 2)
+        g.fill(Path(ellipseIn: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6)), with: .color(accent))
+    }
 
     // A record: black disc, grooves, a colored label, spindle — turning at
     // 33⅓ feel (a slow, steady spin).

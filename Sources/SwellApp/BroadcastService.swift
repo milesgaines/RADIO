@@ -31,9 +31,19 @@ final class BroadcastService: NSObject, ObservableObject {
     /// The key that gates going live. Nil ⇒ this device is not a host and the
     /// GO LIVE control stays hidden.
     static let hostKeyKeychainKey = "radi0.host.key"
+    // isHost gates chrome and is read on nearly every UI render, so a raw
+    // Keychain hit per call becomes a steady main-thread SecItemCopyMatching
+    // flood — wasteful, and on-device a hang risk. Cache in memory and
+    // invalidate whenever the key is written (see BroadcastConsole set/remove).
+    private static var cachedHostKey: String??  // outer nil = not yet loaded
     static func hostKey() -> String? {
-        KeychainSecretStore.shared.secret(forKey: hostKeyKeychainKey)
+        if let cached = cachedHostKey { return cached }
+        let value = KeychainSecretStore.shared.secret(forKey: hostKeyKeychainKey)
+        cachedHostKey = value
+        return value
     }
+    /// Drop the cache after writing/clearing the Keychain host key.
+    static func invalidateHostKeyCache() { cachedHostKey = nil }
     static var isHost: Bool { (hostKey()?.isEmpty == false) }
 
     /// True from the instant we commit to going live until teardown finishes —

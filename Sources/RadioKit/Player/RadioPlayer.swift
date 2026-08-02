@@ -84,7 +84,7 @@ public final class RadioPlayer: ObservableObject {
 
     /// The current listening mode. Persists across launches.
     @Published public private(set) var mode: SoundMode =
-        SoundMode(rawValue: UserDefaults.standard.string(forKey: RadioPlayer.modeKey) ?? "") ?? .spatial
+        SoundMode(rawValue: UserDefaults.standard.string(forKey: RadioPlayer.modeKey) ?? "") ?? .hd
 
     private var stream: LiveStreamService
     private var cancellables: Set<AnyCancellable> = []
@@ -415,6 +415,13 @@ public final class RadioPlayer: ObservableObject {
     private func loadLocal(_ np: NowPlaying, from url: URL) {
         do {
             let file = try AVAudioFile(forReading: url)
+            // Stop the player node BEFORE touching the graph. A station switch
+            // whose incoming track has a different sample rate/channel count
+            // makes reconnectIfNeeded rewire node→eq→musicMixer; disconnecting
+            // a node that is still rendering the previous station's track is an
+            // uncatchable crash (intermittent — only fires on a format change).
+            // Silencing the node first makes the reconnect safe.
+            node.stop()
             reconnectIfNeeded(format: file.processingFormat)
 
             let sampleRate = file.processingFormat.sampleRate
@@ -423,7 +430,6 @@ public final class RadioPlayer: ObservableObject {
             let remaining = file.length - startFrame
             guard remaining > 0 else { return }
 
-            node.stop()
             node.scheduleSegment(
                 file,
                 startingFrame: startFrame,
@@ -464,11 +470,25 @@ public final class RadioPlayer: ObservableObject {
     private func reconnectIfNeeded(format: AVAudioFormat) {
         guard currentFormat?.sampleRate != format.sampleRate
             || currentFormat?.channelCount != format.channelCount else { return }
+        // THE station-switch crash: reconnecting node→eq→musicMixer while
+        // musicMixer still carries the analysis tap AND the engine is rendering
+        // makes AVAudioEngineGraph::UpdateGraphAfterReconfig throw an
+        // uncatchable ObjC exception (SIGABRT) from inside `engine.connect`.
+        // Fully quiesce before rewiring: stop the source, pull the tap, pause
+        // the engine. Then restore — pause (not stop) preserves the ambience
+        // loop and the session, and loadLocal restarts the player right after.
+        node.stop()
+        let hadTap = tapInstalled
+        if hadTap { musicMixer.removeTap(onBus: 0); tapInstalled = false }
+        let wasRunning = engine.isRunning
+        if wasRunning { engine.pause() }
         engine.disconnectNodeOutput(node)
         engine.disconnectNodeOutput(eq)
         engine.connect(node, to: eq, format: format)
         engine.connect(eq, to: musicMixer, format: format)
         currentFormat = format
+        if wasRunning { engine.prepare(); try? engine.start() }
+        if hadTap { installTapIfNeeded() }
     }
 
     /// Activate only when playback genuinely begins — activating at init
@@ -514,7 +534,8 @@ public final class RadioPlayer: ObservableObject {
     /// track length (and the shared radio clock) never budge. SPATIAL stays flat.
     private func startWowFlutter() {
         wowTimer?.invalidate(); wowTimer = nil
-        guard isPlaying, mode != .spatial else { wowFlutter.pitch = 0; return }
+        // Only tape/vinyl wobble; HD and 3D stay dead pitch-flat.
+        guard isPlaying, mode == .vinyl || mode == .cassette else { wowFlutter.pitch = 0; return }
         wowStart = Date()
         let timer = Timer(timeInterval: 1.0 / 50, repeats: true) { [weak self] _ in
             guard let self else { return }
@@ -522,15 +543,16 @@ public final class RadioPlayer: ObservableObject {
             let cents: Double
             switch self.mode {
             case .vinyl:
-                // A 33⅓ platter: a slow once-around wow with a whisper of flutter.
-                cents = 7 * sin(2 * .pi * 0.55 * t) + 2.2 * sin(2 * .pi * 5.5 * t)
+                // A 33⅓ platter: a subtle once-around wow with a whisper of
+                // flutter — felt, not seasick (the old 7-cent wow was too much).
+                cents = 3.0 * sin(2 * .pi * 0.55 * t) + 1.0 * sin(2 * .pi * 5.5 * t)
             case .cassette:
-                // Capstan flutter is the cassette signature — faster and deeper,
-                // a slow bias drift riding underneath.
-                cents = 6 * sin(2 * .pi * 1.2 * t)
-                      + 5 * sin(2 * .pi * 10.5 * t)
-                      + 3 * sin(2 * .pi * 0.28 * t)
-            case .spatial:
+                // Capstan flutter is the cassette signature — a faster wobble
+                // with a slow bias drift riding underneath. Present, musical.
+                cents = 3.5 * sin(2 * .pi * 1.4 * t)
+                      + 2.5 * sin(2 * .pi * 8.0 * t)
+                      + 1.5 * sin(2 * .pi * 0.3 * t)
+            case .hd, .spatial:
                 cents = 0
             }
             self.wowFlutter.pitch = Float(cents)
@@ -554,23 +576,29 @@ public final class RadioPlayer: ObservableObject {
             b.gain = gain; b.bypass = false
         }
         switch mode {
-        case .spatial:   // clean + a hint of air on top; the 3D carries the character
-            set(0, .lowShelf, 100, 0.5, 0)
+        case .hd:        // true to the master — flat, full-range, no coloring
+            set(0, .lowShelf,   100, 0.5, 0)
             set(1, .parametric, 1_000, 1.0, 0)
-            set(2, .parametric, 4_000, 1.0, 1)
-            set(3, .highShelf, 10_000, 0.5, 2.5)
+            set(2, .parametric, 4_000, 1.0, 0)
+            set(3, .highShelf,  12_000, 0.5, 0)
             eq.globalGain = 0
-        case .vinyl:   // warm low end, top rolled off
-            set(0, .lowShelf, 120, 0.5, 3)
-            set(1, .parametric, 900, 1.2, 1)
-            set(2, .parametric, 3_500, 1.0, -2)
-            set(3, .highShelf, 7_000, 0.5, -12)
+        case .spatial:   // 3D carries the width; tone stays flat with a hair of air
+            set(0, .lowShelf,   100, 0.5, 0)
+            set(1, .parametric, 1_000, 1.0, 0)
+            set(2, .parametric, 4_000, 1.0, 0.5)
+            set(3, .highShelf,  11_000, 0.5, 1.5)
+            eq.globalGain = 0
+        case .vinyl:     // warm, bodied, GENTLE air rolloff — not a blanket over the top
+            set(0, .lowShelf,   110, 0.6, 2.5)   // warm low end
+            set(1, .parametric, 260, 1.0, 1.0)   // low-mid body
+            set(2, .parametric, 3_000, 1.2, 0.5) // keep presence alive
+            set(3, .highShelf,  11_000, 0.5, -4) // gentle air rolloff, still open
             eq.globalGain = 1
-        case .cassette: // thin low, limited top, mid-forward
-            set(0, .lowShelf, 90, 0.5, -3)
-            set(1, .parametric, 1_200, 1.0, 1.5)
-            set(2, .parametric, 5_000, 1.2, -4)
-            set(3, .highShelf, 9_000, 0.5, -9)
+        case .cassette:  // band-limited, boxy mids, dull top — a real tape curve
+            set(0, .lowShelf,   90, 0.6, -3.5)   // thin lows
+            set(1, .parametric, 240, 1.1, 1.5)   // boxy low-mid body
+            set(2, .parametric, 3_500, 1.2, -2)  // presence dip
+            set(3, .highShelf,  6_500, 0.5, -10) // dull cassette top
             eq.globalGain = 1
         }
     }
@@ -587,15 +615,21 @@ public final class RadioPlayer: ObservableObject {
         environment.outputType = .auto
         switch mode {
         case .spatial:
+            // Real HRTF width for a stereo master — and NO room reverb. The old
+            // mediumRoom reverb was the "fake": it made every record sound like
+            // it was playing in a tiled room. Width only. On headphones this is
+            // a genuine wide binaural bed; on a speaker `.auto` downmixes it to
+            // clean stereo instead of a phasey artifact.
             spatialSource.sourceMode = .ambienceBed
             spatialSource.renderingAlgorithm = .auto
             spatialSource.position = AVAudio3DPoint(x: 0, y: 0, z: 0)
-            spatialSource.reverbBlend = 0.25
-            environment.reverbParameters.enable = true
-            environment.reverbParameters.level = -8   // dB — a subtle room, not a hall
-            environment.reverbParameters.loadFactoryReverbPreset(.mediumRoom)
-        case .vinyl, .cassette:
-            spatialSource.sourceMode = .bypass         // transparent wire
+            spatialSource.reverbBlend = 0
+            environment.reverbParameters.enable = false
+        case .hd, .vinyl, .cassette:
+            // Transparent wire — HD passes the master untouched; vinyl/cassette
+            // get their character from the EQ + wow/flutter + surface noise, not
+            // from the spatial renderer.
+            spatialSource.sourceMode = .bypass
             spatialSource.reverbBlend = 0
             environment.reverbParameters.enable = false
         }
@@ -673,24 +707,24 @@ public final class RadioPlayer: ObservableObject {
             switch mode {
             case .vinyl:
                 lpPrev += (w - lpPrev) * 0.08
-                let fry = lpPrev * 0.22 + w * 0.004
-                if Float.random(in: 0..<1) < 0.00011 {           // ~5 audible pops/sec
-                    click = Float.random(in: 0.08...0.5) * (Bool.random() ? 1 : -1)
+                let fry = lpPrev * 0.20 + w * 0.003
+                if Float.random(in: 0..<1) < 0.00006 {           // ~2–3 pops/sec, a bed not a machine-gun
+                    click = Float.random(in: 0.05...0.28) * (Bool.random() ? 1 : -1)
                     clickDecay = Float.random(in: 0.55...0.85)
                 }
                 click *= clickDecay
                 phase += rumbleInc
                 s = fry + click + Float(sin(phase)) * 0.010
             case .cassette:
-                let hp = w - hpPrev; hpPrev = w                  // 6 dB/oct HP → bright hiss
+                let hp = w - hpPrev; hpPrev = w                  // 6 dB/oct HP → bright tape hiss
                 phase += humInc
-                s = hp * 0.9 * 0.030 + Float(sin(phase)) * 0.005
-            case .spatial:
+                s = hp * 0.9 * 0.028 + Float(sin(phase)) * 0.005
+            case .hd, .spatial:
                 s = 0
             }
             // A hair of per-channel dither so the loop isn't dead-mono.
             for c in 0..<channels {
-                data[c][i] = s + (mode == .spatial ? 0 : Float.random(in: -1...1) * 0.0015)
+                data[c][i] = s + (mode.hasAmbience ? Float.random(in: -1...1) * 0.0015 : 0)
             }
         }
         return buf

@@ -380,12 +380,14 @@ struct HostKeyEntry: View {
                         try? KeychainSecretStore.shared.setSecret(
                             trimmed, forKey: BroadcastService.hostKeyKeychainKey
                         )
+                        BroadcastService.invalidateHostKeyCache()
                         onSaved()
                     }
                     button("CLEAR", tint: bone.opacity(0.55)) {
                         try? KeychainSecretStore.shared.removeSecret(
                             forKey: BroadcastService.hostKeyKeychainKey
                         )
+                        BroadcastService.invalidateHostKeyCache()
                         onSaved()
                     }
                     button("CLOSE", tint: bone.opacity(0.55)) { onClose() }
