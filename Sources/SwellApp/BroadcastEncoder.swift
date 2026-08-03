@@ -39,13 +39,20 @@ final class BroadcastEncoder: NSObject {
 
     weak var delegate: BroadcastEncoderDelegate?
 
-    /// Where the audio comes from. `.microphone` is the original talk-stream
+    /// Where the show comes from. `.microphone` is the original talk-stream
     /// path (AVCaptureSession, mono). `.mixedFeed` is DJ MODE: the caller
     /// pushes the engine's rendered program (music + mic) in as PCM via
     /// `appendMixed`, and no capture session exists — which also means the
-    /// mixed path runs fine in the simulator.
-    enum Source { case microphone, mixedFeed }
+    /// mixed path runs fine in the simulator. `.cameraShow` is LIVE ON CAMERA:
+    /// front camera + mic through the same capture session, H.264 + AAC muxed
+    /// into the same fMP4 segments — the rest of the pipeline (playlist,
+    /// uploads, radio_live) is identical, the segments just carry picture.
+    enum Source { case microphone, mixedFeed, cameraShow }
     private(set) var source: Source = .microphone
+
+    /// The capture session, exposed so the console can hang a self-view
+    /// (AVCaptureVideoPreviewLayer) on it while the host is on camera.
+    var captureSession: AVCaptureSession { session }
 
     /// ~4 s balances tune-in latency against segment/CDN overhead. The
     /// playlist's `TARGETDURATION` is derived from the segments we actually
@@ -54,10 +61,12 @@ final class BroadcastEncoder: NSObject {
 
     private let session = AVCaptureSession()
     private let audioOut = AVCaptureAudioDataOutput()
+    private let videoOut = AVCaptureVideoDataOutput()
     private let queue = DispatchQueue(label: "radi0.broadcast.encoder")
 
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
+    private var videoInput: AVAssetWriterInput?
     private var sessionStartedAtSource = false
     private var nextSequence = 0
     private var failed = false
@@ -82,6 +91,15 @@ final class BroadcastEncoder: NSObject {
     func start() {
         queue.async { [weak self] in
             self?.source = .microphone
+            self?.startOnQueue()
+        }
+    }
+
+    /// LIVE ON CAMERA: front camera + mic → H.264/AAC fMP4 segments. Same
+    /// playlist, same uploads, same everything — the segments carry picture.
+    func startCameraShow() {
+        queue.async { [weak self] in
+            self?.source = .cameraShow
             self?.startOnQueue()
         }
     }
@@ -197,8 +215,8 @@ final class BroadcastEncoder: NSObject {
         // error surfaced to the console.
         failed = false
         #if targetEnvironment(simulator)
-        // The simulator has no capture-grade audio device; fail honestly
-        // rather than pretend to broadcast silence.
+        // The simulator has no capture-grade devices; fail honestly rather
+        // than pretend to broadcast silence (or a black frame).
         fail("BROADCASTING NEEDS A REAL DEVICE")
         return
         #else
@@ -216,10 +234,37 @@ final class BroadcastEncoder: NSObject {
         audioOut.setSampleBufferDelegate(self, queue: queue)
         guard session.canAddOutput(audioOut) else { session.commitConfiguration(); fail("MIC BUSY"); return }
         session.addOutput(audioOut)
+
+        if source == .cameraShow {
+            // The face of the show: front camera, portrait, 720p. Any failure
+            // here is terminal for the CAMERA show — the console offers the
+            // audio paths separately, so don't silently downgrade a video
+            // show to sound only.
+            guard let cam = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front),
+                  let camInput = try? AVCaptureDeviceInput(device: cam),
+                  session.canAddInput(camInput) else {
+                session.commitConfiguration(); fail("NO CAMERA"); return
+            }
+            session.addInput(camInput)
+            if session.canSetSessionPreset(.hd1280x720) { session.sessionPreset = .hd1280x720 }
+            videoOut.setSampleBufferDelegate(self, queue: queue)
+            videoOut.alwaysDiscardsLateVideoFrames = true
+            guard session.canAddOutput(videoOut) else {
+                session.commitConfiguration(); fail("CAMERA BUSY"); return
+            }
+            session.addOutput(videoOut)
+            // Portrait broadcast — a phone show, held like a phone.
+            if let conn = videoOut.connection(with: .video) {
+                if conn.isVideoRotationAngleSupported(90) { conn.videoRotationAngle = 90 }
+            }
+        }
         session.commitConfiguration()
 
         do {
-            try configureWriter(sampleRate: 44_100, channels: 1, bitRate: 96_000)
+            try configureWriter(sampleRate: 44_100,
+                                channels: 1,
+                                bitRate: source == .cameraShow ? 128_000 : 96_000,
+                                video: source == .cameraShow)
         } catch {
             fail("ENCODER FAILED")
             return
@@ -228,7 +273,8 @@ final class BroadcastEncoder: NSObject {
         #endif
     }
 
-    private func configureWriter(sampleRate: Double, channels: Int, bitRate: Int) throws {
+    private func configureWriter(sampleRate: Double, channels: Int, bitRate: Int,
+                                 video: Bool = false) throws {
         // The URL-less initializer is the segment-authoring path: no output
         // file, segments arrive via the delegate instead.
         let writer = try AVAssetWriter(contentType: UTType.mpeg4Movie)
@@ -247,6 +293,30 @@ final class BroadcastEncoder: NSObject {
         input.expectsMediaDataInRealTime = true
         guard writer.canAdd(input) else { throw EncoderError.setup }
         writer.add(input)
+
+        if video {
+            // 720×1280 portrait H.264, tuned for a phone's upstream: ~1.6 Mbps
+            // keeps a 4 s segment near 800 KB (bucket caps at 4 MB). Frame
+            // reordering OFF — realtime, monotonic PTS, no B-frame latency.
+            // Keyframe cadence ≤ the segment interval so every segment can
+            // open a fresh join (the HLS writer cuts on sync frames).
+            let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: 720,
+                AVVideoHeightKey: 1280,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 1_600_000,
+                    AVVideoAllowFrameReorderingKey: false,
+                    AVVideoMaxKeyFrameIntervalDurationKey: segmentSeconds,
+                    AVVideoExpectedSourceFrameRateKey: 30,
+                ],
+            ])
+            vInput.expectsMediaDataInRealTime = true
+            guard writer.canAdd(vInput) else { throw EncoderError.setup }
+            writer.add(vInput)
+            self.videoInput = vInput
+        }
+
         guard writer.startWriting() else { throw writer.error ?? EncoderError.setup }
 
         self.writer = writer
@@ -260,12 +330,21 @@ final class BroadcastEncoder: NSObject {
         queue.async { [weak self] in
             guard let self else { onFinished?(); return }
             if self.session.isRunning { self.session.stopRunning() }
+            // Empty the session so the NEXT show can wire fresh inputs —
+            // canAddInput refuses a device that's still attached from the
+            // last run, which would read as "MIC BUSY"/"CAMERA BUSY" on
+            // every second broadcast.
+            self.session.beginConfiguration()
+            self.session.inputs.forEach { self.session.removeInput($0) }
+            self.session.outputs.forEach { self.session.removeOutput($0) }
+            self.session.commitConfiguration()
             guard let writer = self.writer, let input = self.input, writer.status == .writing else {
                 self.teardown()
                 onFinished?()
                 return
             }
             input.markAsFinished()
+            self.videoInput?.markAsFinished()
             writer.finishWriting { [weak self] in
                 self?.teardown()
                 onFinished?()
@@ -276,6 +355,7 @@ final class BroadcastEncoder: NSObject {
     private func teardown() {
         writer = nil
         input = nil
+        videoInput = nil
         sessionStartedAtSource = false
         nextSequence = 0
         failed = false
@@ -296,18 +376,30 @@ final class BroadcastEncoder: NSObject {
 
 // MARK: - Capture → writer
 
-extension BroadcastEncoder: AVCaptureAudioDataOutputSampleBufferDelegate {
+extension BroadcastEncoder: AVCaptureAudioDataOutputSampleBufferDelegate,
+                            AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
-        guard let writer, let input, writer.status == .writing else { return }
+        guard let writer, writer.status == .writing else { return }
 
         // Open the session at the first real sample's timestamp — appending
-        // before startSession(atSourceTime:) drops the buffer on the floor.
+        // before startSession(atSourceTime:) is a hard error. For a CAMERA
+        // show the clock opens on the first VIDEO frame (audio landing a beat
+        // earlier would front-pad the picture with black); buffers arriving
+        // before that are dropped, not appended.
         if !sessionStartedAtSource {
+            if source == .cameraShow && output !== videoOut { return }
             writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
             sessionStartedAtSource = true
         }
+        if output === videoOut {
+            if let videoInput, videoInput.isReadyForMoreMediaData {
+                videoInput.append(sampleBuffer)
+            }
+            return
+        }
+        guard let input else { return }
         if input.isReadyForMoreMediaData {
             input.append(sampleBuffer)
         }

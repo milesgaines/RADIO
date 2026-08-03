@@ -29,6 +29,32 @@ struct LiveVideoSurface: UIViewRepresentable {
     }
 }
 
+/// The host's self-view while ON CAMERA — a preview layer straight off the
+/// broadcast capture session. Mirrored by the layer for front cameras, like
+/// every camera app; the transmitted picture is unmirrored.
+struct CameraSelfView: UIViewRepresentable {
+    let session: AVCaptureSession
+
+    func makeUIView(context: Context) -> PreviewView {
+        let v = PreviewView()
+        v.previewLayer.session = session
+        v.previewLayer.videoGravity = .resizeAspectFill
+        v.backgroundColor = .black
+        return v
+    }
+
+    func updateUIView(_ view: PreviewView, context: Context) {
+        if view.previewLayer.session !== session {
+            view.previewLayer.session = session
+        }
+    }
+
+    final class PreviewView: UIView {
+        override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+        var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+    }
+}
+
 /// Full-screen replay theater for taped shows — VOD, so system controls are
 /// right here (scrub, AirPlay, the lot).
 struct ReplayTheater: View {

@@ -52,6 +52,8 @@ final class BroadcastService: NSObject, ObservableObject {
     private(set) var isBroadcasting = false
     /// The station this broadcast owns (uppercased app id form).
     private(set) var stationID: String?
+    /// The show's title, kept for the tape filed at stop.
+    private var showTitle = ""
 
     /// Pause/resume the radio around a MIC-ONLY broadcast — the fallback when
     /// the DJ graph can't start. In DJ MODE the music never stops.
@@ -65,9 +67,16 @@ final class BroadcastService: NSObject, ObservableObject {
     var startDJAudio: () -> Bool = { false }
     /// Tear the mic back out; the deck plays on.
     var stopDJAudio: () -> Void = {}
-    /// Which path this show is using.
-    enum Mode { case dj, micOnly }
+    /// Which path this show is using. `.camera` is LIVE ON CAMERA — the
+    /// phone's front camera + mic, video on every listener's screen.
+    enum Mode { case dj, micOnly, camera }
     private(set) var mode: Mode = .micOnly
+
+    /// The capture session while ON CAMERA — the console hangs the host's
+    /// self-view on it. nil in the audio modes.
+    var cameraPreviewSession: AVCaptureSession? {
+        isBroadcasting && mode == .camera ? encoder.captureSession : nil
+    }
     /// Read on the AUDIO thread by forwardMixed — benign single-writer flag.
     private nonisolated(unsafe) var mixedFeedOpen = false
 
@@ -105,7 +114,7 @@ final class BroadcastService: NSObject, ObservableObject {
 
     // MARK: - Go live
 
-    func goLive(title: String, stationID: String) {
+    func goLive(title: String, stationID: String, camera: Bool = false) {
         guard case .idle = state else { return }
         guard let hostKey = Self.hostKey(), !hostKey.isEmpty else {
             state = .failed("NOT A HOST")
@@ -113,18 +122,37 @@ final class BroadcastService: NSObject, ObservableObject {
         }
         self.key = hostKey
         self.stationID = stationID
+        self.showTitle = title
         state = .starting
 
         Task { @MainActor in
             #if os(iOS)
             let granted = await AVAudioApplication.requestRecordPermission()
             guard granted else { self.state = .failed("MIC IS OFF — SETTINGS › RADI0"); return }
+            if camera {
+                let camOK = await AVCaptureDevice.requestAccess(for: .video)
+                guard camOK else { self.state = .failed("CAMERA IS OFF — SETTINGS › RADI0"); return }
+            }
             #endif
 
-            // DJ MODE first: the mic joins the music engine, the deck keeps
-            // spinning, the voice rides over a ducked bed. Only if that graph
-            // refuses do we fall back to the original mic-only talk stream.
-            if self.startDJAudio() {
+            if camera {
+                // LIVE ON CAMERA: the phone is the studio. The radio clears
+                // the output (hearing yourself back is feedback + latency)
+                // and the capture session owns both camera and mic.
+                self.mode = .camera
+                self.pauseRadio()
+                #if os(iOS)
+                let audio = AVAudioSession.sharedInstance()
+                do {
+                    try audio.setCategory(.playAndRecord, mode: .videoChat, options: [.defaultToSpeaker, .allowBluetooth])
+                    try audio.setActive(true)
+                } catch {
+                    self.state = .failed("MIC UNAVAILABLE"); return
+                }
+                #endif
+            } else if self.startDJAudio() {
+                // DJ MODE: the mic joins the music engine, the deck keeps
+                // spinning, the voice rides over a ducked bed.
                 self.mode = .dj
             } else {
                 self.mode = .micOnly
@@ -161,6 +189,8 @@ final class BroadcastService: NSObject, ObservableObject {
                     self.mixedFeedOpen = true
                 case .micOnly:
                     self.encoder.start()
+                case .camera:
+                    self.encoder.startCameraShow()
                 }
                 self.state = .onAir(since: Date())
             case .failure(let message):
@@ -214,7 +244,7 @@ final class BroadcastService: NSObject, ObservableObject {
                 case .dj:
                     // The deck never stopped — just take the mic out.
                     self.stopDJAudio()
-                case .micOnly:
+                case .micOnly, .camera:
                     self.restoreSession()
                     self.resumeRadio()
                 }
@@ -350,11 +380,16 @@ final class BroadcastService: NSObject, ObservableObject {
     }
 
     private func postStop() async -> Bool {
+        // The show tapes itself: hand the server what it needs to file the
+        // finished playlist as a replay episode (skip when nothing aired).
+        let duration = segments.reduce(0) { $0 + $1.duration }
         let (body, boundary) = multipart([
             ("action", "stop"),
             ("station_id", stationID?.lowercased() ?? ""),
             ("session", sessionID),
             ("key", key),
+            ("title", showTitle),
+            ("duration", segments.isEmpty ? "" : String(format: "%.1f", duration)),
         ], file: nil)
         let code = await send(body, boundary: boundary)?.0 ?? 0
         return code == 200
@@ -390,7 +425,7 @@ extension BroadcastService: BroadcastEncoderDelegate {
         switch mode {
         case .dj:
             stopDJAudio()
-        case .micOnly:
+        case .micOnly, .camera:
             restoreSession()
             resumeRadio()
         }

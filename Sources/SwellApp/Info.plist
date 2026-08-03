@@ -2,99 +2,74 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>en</string>
-    <!-- Must be globally unique on the App Store (ITMS-90129 rejects the
-         build otherwise — "RADIO" alone is taken). Matches the ASC listing. -->
-    <!-- RADI0 with a zero — distinct from every taken "RADIO" (ITMS-90129). -->
-    <key>CFBundleDisplayName</key>
-    <string>RADI0</string>
-    <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>RADI0</string>
-    <key>CFBundlePackageType</key>
-    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$(MARKETING_VERSION)</string>
-    <key>CFBundleVersion</key>
-    <string>$(CURRENT_PROJECT_VERSION)</string>
-
-    <!-- Standard crypto only (HTTPS) — skips the TestFlight compliance prompt. -->
-    <key>ITSAppUsesNonExemptEncryption</key>
-    <false/>
-
-    <!-- Modern launch screen; without it iOS letterboxes the app. -->
-    <key>UILaunchScreen</key>
-    <dict/>
-
-    <!-- The phone experience is designed portrait-only (the car gets CarPlay). -->
-    <key>UISupportedInterfaceOrientations</key>
-    <array>
-        <string>UIInterfaceOrientationPortrait</string>
-    </array>
-
-    <!-- Let the plate run at 120 Hz on ProMotion. -->
-    <key>CADisableMinimumFrameDurationOnPhone</key>
-    <true/>
-
-    <!-- OFL-licensed display faces (see Resources/Fonts/OFL-*.txt). -->
-    <key>UIAppFonts</key>
-    <array>
-        <string>ClimateCrisis.ttf</string>
-        <string>GasoekOne-Regular.ttf</string>
-        <string>ArchivoBlack-Regular.ttf</string>
-        <string>InstrumentSerif-Regular.ttf</string>
-    </array>
-
-    <!-- THE LINE: hold-to-talk call-ins record from the mic. Recording only
-         ever runs while the user is physically holding the button. -->
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Hold to talk puts your voice on the line. The director decides what airs.</string>
-
-    <!-- Required by ingest (ITMS-90683): the GO LIVE broadcast engine links
-         AVCaptureSession, and Apple's analyzer demands the camera string for
-         any capture-framework reference. The app never captures video and
-         never requests camera access — iOS will never show this prompt. -->
-    <key>NSCameraUsageDescription</key>
-    <string>RADI0 never takes photos or video. The broadcast engine uses Apple's capture framework for the microphone only.</string>
-
-    <!-- Keep audio playing (and votes flowing) in the background / in-car. -->
-    <key>UIBackgroundModes</key>
-    <array>
-        <string>audio</string>
-    </array>
-
-    <!-- Two scenes: the SwiftUI phone app and the CarPlay audio scene. -->
-    <key>UIApplicationSceneManifest</key>
-    <dict>
-        <key>UIApplicationSupportsMultipleScenes</key>
-        <true/>
-        <key>UISceneConfigurations</key>
-        <dict>
-            <key>UIWindowSceneSessionRoleApplication</key>
-            <array>
-                <dict>
-                    <key>UISceneConfigurationName</key>
-                    <string>Phone</string>
-                    <key>UISceneDelegateClassName</key>
-                    <string>$(PRODUCT_MODULE_NAME).PhoneSceneDelegate</string>
-                </dict>
-            </array>
-            <key>CPTemplateApplicationSceneSessionRoleApplication</key>
-            <array>
-                <dict>
-                    <key>UISceneConfigurationName</key>
-                    <string>CarPlay</string>
-                    <key>UISceneDelegateClassName</key>
-                    <string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
-                </dict>
-            </array>
-        </dict>
-    </dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>RADI0</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>RADI0</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>RADI0 uses the camera only when you GO LIVE on camera — your show streams to everyone tuned in. The app never takes photos.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hold to talk puts your voice on the line. The director decides what airs.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>ClimateCrisis.ttf</string>
+		<string>GasoekOne-Regular.ttf</string>
+		<string>ArchivoBlack-Regular.ttf</string>
+		<string>InstrumentSerif-Regular.ttf</string>
+	</array>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>CarPlay</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
+				</dict>
+			</array>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Phone</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).PhoneSceneDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>

@@ -89,8 +89,9 @@ Deno.serve(async (req) => {
       const file = form.get("file");
       if (!NAME_RE.test(name)) return json({ error: "name" }, 400);
       if (!(file instanceof File)) return json({ error: "file" }, 400);
-      // A voice fragment is small; a fat one is abuse, not audio.
-      if (file.size > 3 * 1024 * 1024) return json({ error: "too_big" }, 413);
+      // Camera shows carry H.264: a 4s segment at ~1.6 Mbps is ~800 KB.
+      // 4 MB (the bucket's own cap) is generous headroom; fatter is abuse.
+      if (file.size > 4 * 1024 * 1024) return json({ error: "too_big" }, 413);
       const contentType = name.endsWith(".mp4") ? "video/mp4" : "video/iso.segment";
       const up = await supa.storage.from(BUCKET).upload(`${dir}/${name}`, file, {
         contentType,
@@ -124,7 +125,28 @@ Deno.serve(async (req) => {
         p_key: key,
       });
       if (error) return json({ error: error.message }, 500);
-      return json({ ok: true });
+      // The show tapes itself: the closing playlist (ENDLIST) is already a
+      // VOD — file it on the replay shelf. Only when something actually
+      // aired (the client sends duration only then); dedupe on the session.
+      const durStr = String(form.get("duration") ?? "");
+      const duration = Number(durStr);
+      if (durStr && Number.isFinite(duration) && duration > 5) {
+        const title = String(form.get("title") ?? "").slice(0, 80) || "LIVE SHOW";
+        const { data: pub } = supa.storage.from(BUCKET).getPublicUrl(playlistPath);
+        const { error: epErr } = await supa.rpc("radio_add_episode", {
+          p_station: station,
+          p_title: title,
+          p_host: null,
+          p_source: "phone",
+          p_provider_asset_id: `phone:${dir}`,
+          p_hls: pub.publicUrl,
+          p_duration: duration,
+          p_recorded_at: new Date().toISOString(),
+        });
+        if (epErr) return json({ ok: true, taped: false, tape_error: epErr.message });
+        return json({ ok: true, taped: true });
+      }
+      return json({ ok: true, taped: false });
     }
 
     // Storage hygiene: a finished show's fragments live on so late joiners can

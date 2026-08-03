@@ -25,6 +25,7 @@ struct BroadcastConsole: View {
     let onClose: () -> Void
 
     @State private var title = ""
+    @State private var cameraOn = true
     @StateObject private var board = CallBoardService()
     @State private var showBoard = false
 
@@ -137,12 +138,19 @@ struct BroadcastConsole: View {
             }
             .frame(maxWidth: 280)
 
-            borderedButton("GO LIVE", tint: accent) {
-                let show = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                service.goLive(title: show, stationID: stationID)
+            // The show's face: ON CAMERA is the default — the phone IS the
+            // studio. AUDIO ONLY keeps the classic talk/DJ stream.
+            HStack(spacing: 10) {
+                modeChip("ON CAMERA", icon: "video.fill", active: cameraOn) { cameraOn = true }
+                modeChip("AUDIO ONLY", icon: "mic.fill", active: !cameraOn) { cameraOn = false }
             }
 
-            Text("YOU TAKE THE AIR ON \(stationName.uppercased()) \u{2014} EVERYONE TUNED IN HEARS YOU LIVE")
+            borderedButton("GO LIVE", tint: accent) {
+                let show = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                service.goLive(title: show, stationID: stationID, camera: cameraOn)
+            }
+
+            Text("YOU TAKE THE AIR ON \(stationName.uppercased()) \u{2014} EVERYONE TUNED IN \(cameraOn ? "SEES" : "HEARS") YOU LIVE")
                 .font(.custom("Archivo Black", size: 10))
                 .tracking(1.6)
                 .foregroundStyle(bone.opacity(0.28))
@@ -153,6 +161,21 @@ struct BroadcastConsole: View {
 
             boardButton
         }
+    }
+
+    private func modeChip(_ label: String, icon: String, active: Bool,
+                          action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 10, weight: .bold))
+                Text(label).font(.custom("Archivo Black", size: 10)).tracking(1.2)
+            }
+            .foregroundStyle(active ? ink : bone.opacity(0.6))
+            .padding(.horizontal, 13).padding(.vertical, 9)
+            .background(Rectangle().fill(active ? bone : .clear))
+            .overlay(Rectangle().strokeBorder(bone.opacity(active ? 0 : 0.35), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
     }
 
     /// Into the screener's queue — pending call-ins waiting to be aired.
@@ -183,9 +206,23 @@ struct BroadcastConsole: View {
                     .foregroundStyle(ink)
             }
 
-            Text("ON AIR")
-                .font(.custom("Gasoek One", size: 64))
-                .foregroundStyle(ink)
+            // ON CAMERA: the host's self-view — what the audience is seeing,
+            // straight off the capture session. Audio shows keep the big sign.
+            if let session = service.cameraPreviewSession {
+                CameraSelfView(session: session)
+                    .aspectRatio(9.0 / 16.0, contentMode: .fit)
+                    .frame(maxHeight: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(ink.opacity(0.4), lineWidth: 1.5))
+                Text("ON AIR")
+                    .font(.custom("Gasoek One", size: 40))
+                    .foregroundStyle(ink)
+            } else {
+                Text("ON AIR")
+                    .font(.custom("Gasoek One", size: 64))
+                    .foregroundStyle(ink)
+            }
 
             if !title.isEmpty {
                 Text(title.uppercased())

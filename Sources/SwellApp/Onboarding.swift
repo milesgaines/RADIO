@@ -233,11 +233,15 @@ struct SignInSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 SignInWithAppleButton(.signIn) { request in
-                    request.requestedScopes = [.fullName]
+                    // Email is the (hidden) staff door: an @onesync.music
+                    // address quietly unlocks host + programmer powers.
+                    request.requestedScopes = [.fullName, .email]
                 } onCompletion: { result in
                     if case let .success(auth) = result,
                        let cred = auth.credential as? ASAuthorizationAppleIDCredential {
-                        AuthService.shared.completeSignIn(userID: cred.user, fullName: cred.fullName)
+                        AuthService.shared.completeSignIn(userID: cred.user,
+                                                         fullName: cred.fullName,
+                                                         identityToken: cred.identityToken)
                     }
                     // Failure/cancel: leave the sheet up so they can retry or
                     // close it themselves — no silent dismissal of their intent.

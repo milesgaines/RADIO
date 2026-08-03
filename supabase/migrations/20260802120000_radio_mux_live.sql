@@ -91,13 +91,15 @@ grant select on public.radio_episodes to anon, authenticated;
 -- ---------------------------------------------------------------------------
 -- Station → stream mapping (public identifiers only)
 -- ---------------------------------------------------------------------------
--- PWR DAMIZZA, the flagship. Created 2026-08-02 via the Mux API
--- (audio_only, reconnect_window 300, auto-recording to public assets).
+-- PWR DAMIZZA, the flagship. Created 2026-08-02 via the Mux API — VIDEO
+-- stream (the original audio_only stream was deleted the same day when the
+-- product went video-live), reconnect_window 300, auto-records to public
+-- assets.
 
 insert into public.radio_mux (station_id, live_stream_id, playback_id) values
   ('bb940e5c-0a54-852c-b00c-81434978757c',
-   'VJBOq9KmniP9hq6dRsM5CFzJR6Qc02S15aN5uEXepFjg',
-   'pLeaN01o1yEhGSqG8ySVe9jumJKukiAOymPKNtTmW2Kk')
+   'IyB4mgRq7TTQd8J9CORkkd29KUJliTtHw3Ks5Ka11eg',
+   'ZVvjCz3OLn5Ie5F4uGH01u3kMB01zD46QPjJ202SAVOyP8')
 on conflict (station_id) do update
   set live_stream_id = excluded.live_stream_id,
       playback_id = excluded.playback_id;

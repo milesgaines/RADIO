@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AuthenticationServices
+import RadioKit
 
 /// "Listen instantly, sign in to act."
 ///
@@ -65,7 +66,8 @@ final class AuthService: NSObject, ObservableObject {
 
     /// Apple returned a credential — persist it, promote identity, and run
     /// whatever the listener was trying to do when we interrupted them.
-    func completeSignIn(userID: String, fullName: PersonNameComponents?) {
+    func completeSignIn(userID: String, fullName: PersonNameComponents?,
+                        identityToken: Data? = nil) {
         self.userID = userID
         defaults.set(userID, forKey: userKey)
         if let fullName {
@@ -79,6 +81,34 @@ final class AuthService: NSObject, ObservableObject {
         let pending = prompt
         prompt = nil
         pending?.action()   // the boost/bury/dedicate they came for
+        resolveRole(identityToken: identityToken)
+    }
+
+    /// The hidden staff door. The server verifies Apple's own signed token —
+    /// never the client's word — and an @onesync.music identity comes back
+    /// with the operator key, which lands in the Keychain exactly as if it
+    /// were pasted by hand. Fans get {"role":"fan"} and nothing changes.
+    /// Silent by design: no role UI exists anywhere.
+    private func resolveRole(identityToken: Data?) {
+        guard let identityToken,
+              let token = String(data: identityToken, encoding: .utf8),
+              let url = URL(string: "https://tgkgdquivdoquxamtgcr.supabase.co/functions/v1/apple-role")
+        else { return }
+        Task {
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONEncoder().encode(["identity_token": token])
+            guard let (data, resp) = try? await URLSession.shared.data(for: req),
+                  (resp as? HTTPURLResponse)?.statusCode == 200 else { return }
+            struct RoleReply: Decodable { let role: String; let host_key: String? }
+            guard let reply = try? JSONDecoder().decode(RoleReply.self, from: data),
+                  reply.role == "staff", let key = reply.host_key, !key.isEmpty
+            else { return }
+            try? KeychainSecretStore.shared.setSecret(
+                key, forKey: BroadcastService.hostKeyKeychainKey)
+            BroadcastService.invalidateHostKeyCache()
+        }
     }
 
     /// The listener backed out of the sheet — drop the pending action.
