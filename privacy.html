@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADI0 — PRIVACY</title>
+<meta name="description" content="RADI0 privacy policy. What we collect, why, and what we don't do.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600&family=Archivo+Black&family=Gasoek+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:   #0a0a0c;
+    --bone:  #f1ecdf;
+    --ember: #ff5c2e;
+    --hair:  rgba(241, 236, 223, 0.22);
+    --dim:   rgba(241, 236, 223, 0.45);
+    --body:  rgba(241, 236, 223, 0.82);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--ink);
+    color: var(--bone);
+    font-family: 'Archivo', system-ui, sans-serif;
+    min-height: 100svh;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  header { display: flex; align-items: center; padding: 1.25rem 1.5rem; }
+  .wordmark {
+    display: flex; align-items: center;
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    font-size: 1.3rem; letter-spacing: 0.08em; line-height: 1;
+    user-select: none;
+  }
+  .wordmark svg { width: 1em; height: 1em; display: block; margin-left: 0.1em; }
+
+  main {
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: 1.5rem 1.5rem 4rem;
+  }
+  h1 {
+    font-family: 'Gasoek One', sans-serif;
+    font-size: clamp(2.8rem, 14vw, 5.5rem);
+    line-height: 0.95; letter-spacing: 0.02em;
+  }
+  .sub {
+    margin-top: 0.7rem;
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    font-size: 0.6rem; letter-spacing: 0.34em;
+    color: var(--dim);
+  }
+  .meta {
+    margin-top: 1.6rem;
+    padding: 0.8rem 0;
+    border-top: 1px solid var(--hair);
+    border-bottom: 1px solid var(--hair);
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    font-size: 0.55rem; letter-spacing: 0.26em; line-height: 2;
+    color: var(--dim);
+  }
+
+  section { margin-top: 2.8rem; }
+  .sec-label {
+    display: flex; align-items: baseline; gap: 0.8rem;
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    font-size: 0.66rem; letter-spacing: 0.32em;
+    margin-bottom: 1.2rem;
+  }
+  .sec-label .n { color: var(--ember); }
+
+  p { font-size: 0.95rem; line-height: 1.75; color: var(--body); margin-bottom: 1rem; }
+
+  dl { margin-top: 0.4rem; }
+  dt {
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    font-size: 0.6rem; letter-spacing: 0.28em;
+    color: var(--bone);
+    margin-top: 1.5rem;
+  }
+  dt:first-child { margin-top: 0; }
+  dd { margin-top: 0.5rem; font-size: 0.95rem; line-height: 1.75; color: var(--body); }
+
+  ul.flat { list-style: none; }
+  ul.flat li {
+    font-size: 0.95rem; line-height: 1.75; color: var(--body);
+    padding: 0.65rem 0;
+    border-top: 1px solid rgba(241, 236, 223, 0.12);
+  }
+  ul.flat li:first-child { border-top: none; padding-top: 0; }
+  ul.flat li b {
+    font-family: 'Archivo Black', system-ui, sans-serif; font-weight: normal;
+    font-size: 0.6rem; letter-spacing: 0.24em;
+    display: block; margin-bottom: 0.25rem;
+  }
+
+  .contact-line {
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    font-size: 0.72rem; letter-spacing: 0.12em;
+    margin-top: 0.4rem;
+  }
+  .contact-line a {
+    color: var(--ember);
+    border-bottom: 1px solid rgba(255, 92, 46, 0.4);
+    padding-bottom: 0.15rem;
+  }
+  .contact-line a:hover { border-bottom-color: var(--ember); }
+
+  footer {
+    display: flex; justify-content: center; align-items: center; gap: 0.9rem;
+    padding: 1rem 1.5rem 2.5rem;
+    font-family: 'Archivo Black', system-ui, sans-serif;
+  }
+  footer a {
+    font-size: 0.6rem; letter-spacing: 0.3em; color: var(--dim);
+    border-bottom: 1px solid transparent; padding-bottom: 0.2rem;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  footer a:hover { color: var(--bone); border-bottom-color: var(--hair); }
+  .foot-sep { color: rgba(241, 236, 223, 0.28); font-size: 0.6rem; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="wordmark" href="index.html" aria-label="RADI0 — HOME">
+    RADI<svg viewBox="0 0 100 100" role="img" aria-label="0" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="34" fill="none" stroke="#ff5c2e" stroke-width="28"/>
+    </svg>
+  </a>
+</header>
+
+<main>
+  <h1>PRIVACY</h1>
+  <div class="sub">RADI0 &middot; PRIVACY POLICY</div>
+  <div class="meta">
+    EFFECTIVE AUGUST 2026<br>
+    OPERATOR: ONESYNC MEDIA LLC
+  </div>
+
+  <section>
+    <div class="sec-label"><span class="n">01</span><span>WHAT RADI0 COLLECTS — AND WHY</span></div>
+    <p>RADI0 is a live radio service. It collects the minimum required to run a
+    station where votes are honest and one person counts once.</p>
+    <dl>
+      <dt>ANONYMOUS LISTENER ID</dt>
+      <dd>A random identifier (UUID) generated on your device. It is used for
+      listener counts and vote integrity. It is not derived from — and not
+      linked to — your name, email, or any account.</dd>
+
+      <dt>SIGN IN WITH APPLE</dt>
+      <dd>If you sign in, Apple provides RADI0 a stable user identifier. Your
+      name is optional. Your email is received only if you choose to share it.
+      This identity is used solely as the one-person-one-vote key — and, for
+      station staff, to verify role. It is not used for anything else.</dd>
+
+      <dt>VOTES</dt>
+      <dd>Boosts and buries are stored tied to your identity so that each
+      person counts once. Votes are what programs the station.</dd>
+
+      <dt>MICROPHONE</dt>
+      <dd>Accessed only while you use call-in or host broadcasting. In those
+      moments your audio is streamed and uploaded — that is the feature. The
+      microphone is not touched at any other time.</dd>
+
+      <dt>CAMERA</dt>
+      <dd>Accessed only while a host runs a camera broadcast. Never otherwise.</dd>
+
+      <dt>LISTENING</dt>
+      <dd>Requires no account. You can listen without telling us who you are.</dd>
+    </dl>
+  </section>
+
+  <section>
+    <div class="sec-label"><span class="n">02</span><span>WHAT WE DON'T DO</span></div>
+    <ul class="flat">
+      <li><b>NO ADS</b>There is no advertising in RADI0.</li>
+      <li><b>NO DATA SALE</b>We do not sell your data. Not to anyone, not in aggregate.</li>
+      <li><b>NO CROSS-APP TRACKING</b>We do not track you across other apps or websites.</li>
+      <li><b>NO LOCATION</b>We do not collect your location.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-label"><span class="n">03</span><span>RETENTION</span></div>
+    <p>Votes and play history are retained as station records — they are the
+    station's programming log. To request deletion of data tied to your
+    identity, contact the address below and we will remove it.</p>
+  </section>
+
+  <section>
+    <div class="sec-label"><span class="n">04</span><span>CONTACT</span></div>
+    <p>RADI0 is operated by OneSync Media LLC. Questions, data requests,
+    deletion requests:</p>
+    <div class="contact-line">
+      <a href="mailto:onesyncdistribution@gmail.com">ONESYNCDISTRIBUTION@GMAIL.COM</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <a href="index.html">RADI0</a>
+  <span class="foot-sep">&middot;</span>
+  <a href="support.html">SUPPORT</a>
+</footer>
+
+</body>
+</html>
