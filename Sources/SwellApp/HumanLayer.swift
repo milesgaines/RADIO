@@ -265,6 +265,29 @@ struct ControlDeck: View {
         .frame(maxWidth: .infinity)
         .lineLimit(1).minimumScaleFactor(0.7)
         }
+        .padding(.horizontal, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(deckTray)
+    }
+
+    /// The control surface the transport sits on — a recessed warm-dark panel,
+    /// top-lit with a hairline. Frames the deck as one device, not five buttons.
+    private var deckTray: some View {
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        return shape
+            .fill(LinearGradient(
+                colors: [Color(red: 0.11, green: 0.10, blue: 0.095).opacity(0.92),
+                         Color(red: 0.05, green: 0.045, blue: 0.04).opacity(0.92)],
+                startPoint: .top, endPoint: .bottom))
+            .overlay(shape.strokeBorder(HumanTheme.bone.opacity(0.10), lineWidth: 1))
+            .overlay(alignment: .top) {
+                shape.inset(by: 1)
+                    .stroke(HumanTheme.bone.opacity(0.13), lineWidth: 1)
+                    .mask(LinearGradient(colors: [.white, .clear],
+                                         startPoint: .top, endPoint: .center))
+            }
+            .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
     }
 
     private func deckButton(
@@ -275,21 +298,19 @@ struct ControlDeck: View {
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 25, weight: .bold))
-                    .foregroundStyle(tint)
-                    .frame(width: 66, height: 66)
-                    .background(DeckKey.raised)
-                    .overlay(
-                        // A lit key: the accent smoulders up from the key's
-                        // base — BOOST reads armed before it's ever touched.
-                        Circle()
-                            .fill(RadialGradient(
-                                colors: [(glow ?? .clear).opacity(glow == nil ? 0 : 0.28), .clear],
-                                center: .init(x: 0.5, y: 0.95),
-                                startRadius: 2, endRadius: 44))
-                            .allowsHitTesting(false)
-                    )
+                ZStack {
+                    DeckKey.vintage(glow: glow)
+                    // The glyph, molded into the cap: a dark copy dropped
+                    // below the tinted face reads as raised plastic/metal.
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.black.opacity(0.6))
+                        .offset(y: 1.4)
+                    Image(systemName: icon)
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(tint)
+                }
+                .frame(width: 64, height: 58)
                 Text(label)
                     .font(.custom("Archivo Black", size: 11))
                     .tracking(1.4)
@@ -300,21 +321,39 @@ struct ControlDeck: View {
     }
 }
 
-/// A raised physical key: warm dark face lit from above, hairline rim, a soft
-/// top specular, dropped on a shadow. Vintage hi-fi button, modern and clean.
+/// A vintage transport key: a chamfered metal cap, warm and dark, lit from
+/// above — a top-bevel highlight, a bottom-inner shadow, a hairline rim, a
+/// soft specular, dropped on its own shadow. The cassette-deck button feel.
 enum DeckKey {
-    static var raised: some View {
-        Circle()
+    static func vintage(glow: Color? = nil) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        return shape
             .fill(LinearGradient(
-                colors: [Color(red: 0.17, green: 0.16, blue: 0.16),
-                         Color(red: 0.07, green: 0.065, blue: 0.07)],
+                colors: [Color(red: 0.20, green: 0.185, blue: 0.175),
+                         Color(red: 0.065, green: 0.06, blue: 0.055)],
                 startPoint: .top, endPoint: .bottom))
-            .overlay(Circle().strokeBorder(HumanTheme.bone.opacity(0.16), lineWidth: 1))
+            // Ember smoulder from the base for a lit key (BOOST).
             .overlay(
-                Ellipse().fill(HumanTheme.bone.opacity(0.14))
-                    .frame(width: 32, height: 15).blur(radius: 6).offset(y: -15)
+                shape.fill(RadialGradient(
+                    colors: [(glow ?? .clear).opacity(glow == nil ? 0 : 0.30), .clear],
+                    center: .init(x: 0.5, y: 1.0), startRadius: 2, endRadius: 46))
             )
-            .shadow(color: .black.opacity(0.55), radius: 7, x: 0, y: 5)
+            // Chamfer: bright top-inner edge, dark bottom-inner edge.
+            .overlay(
+                shape.inset(by: 1).stroke(
+                    LinearGradient(colors: [HumanTheme.bone.opacity(0.22), .clear,
+                                            .black.opacity(0.45)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1.5)
+            )
+            .overlay(shape.strokeBorder(HumanTheme.bone.opacity(0.14), lineWidth: 1))
+            // Top specular.
+            .overlay(alignment: .top) {
+                Ellipse().fill(HumanTheme.bone.opacity(0.16))
+                    .frame(width: 34, height: 12).blur(radius: 6).offset(y: 6)
+            }
+            .shadow(color: .black.opacity(0.6), radius: 7, x: 0, y: 5)
+            .allowsHitTesting(false)
     }
 }
 

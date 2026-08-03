@@ -36,6 +36,10 @@ final class AppServices: ObservableObject {
     let theRead: TheReadService
     /// Artwork for the away surfaces — lock screen / StandBy / CarPlay.
     let artwork = ArtworkService()
+    /// The on-air record's real cover, for the main screen's now-playing card.
+    /// nil while unknown / for a record that carries no art (the card draws a
+    /// disc placeholder). Set on the main actor by observeArtwork.
+    @Published private(set) var nowPlayingCover: UIImage?
     /// The real numbers: presence + votes over Supabase realtime.
     private let backend: RadioBackend
 
@@ -254,6 +258,7 @@ final class AppServices: ObservableObject {
                 let index = self.streams.firstIndex(where: { $0 === stream }) ?? 0
                 // 1) The plate, immediately — the lock screen is never bare.
                 self.push(self.artwork.plate(for: station, accentIndex: index))
+                self.nowPlayingCover = nil   // reset for the new record
                 // 2) The record's own cover, if one can be found and we're
                 // still on the same song by the time it arrives.
                 guard let track else { return }
@@ -262,6 +267,7 @@ final class AppServices: ObservableObject {
                     guard self.activeStream === stream,
                           self.activeStream.nowPlaying?.track.id == track.id else { return }
                     self.push(cover)
+                    self.nowPlayingCover = cover
                 }
             }
             .store(in: &cancellables)

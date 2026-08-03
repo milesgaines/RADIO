@@ -592,49 +592,17 @@ private struct PlateView: View {
 
             Spacer()
 
-            // THE MARQUEE — bass-lit ember rules, an ON AIR cap, and the track
-            // crawling between them like a theater sign. A live show owns it
-            // outright (no up-next while a human's on the air).
-            VStack(spacing: 0) {
-                emberRule
-                HStack(spacing: 12) {
-                    marqueeCap(player.isLive ? "LIVE" : (yourPick ? "YOUR PICK" : "ON AIR"))
-                    if player.isLive {
-                        Ticker(text: player.liveTitle.isEmpty
-                               ? "LIVE ON \(stream.station.name.uppercased())"
-                               : player.liveTitle.uppercased(),
-                               font: .custom("Archivo Black", size: 18), color: bone)
-                    } else if let np = stream.nowPlaying {
-                        Ticker(text: "\(np.track.title) — \(np.track.artistName)"
-                               + (np.track.albumTitle.map { " — \($0)" } ?? "")
-                               + (services.airLog.dedication(for: np.track.id).map { " — FOR \($0.uppercased())" } ?? ""),
-                               font: .custom("Archivo Black", size: 18), color: bone)
-                        if np.boostScore != 0 {
-                            Text(np.boostScore > 0 ? "▲\(np.boostScore)" : "▼\(-np.boostScore)")
-                                .font(.custom("Archivo Black", size: 17))
-                                .foregroundStyle(np.boostScore > 0 ? accent : bone.opacity(0.7))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                                .animation(.snappy, value: np.boostScore)
-                        }
-                    }
-                    // THE DIAL door — the lineup card. The chip makes the
-                    // whole marquee band read as tappable (it is). SHOWS
-                    // moved to the top bar — one door, one place.
-                    Text("DIAL ▾")
-                        .font(.custom("Archivo Black", size: 10)).tracking(1.2)
-                        .foregroundStyle(bone.opacity(0.6))
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .overlay(Capsule().strokeBorder(bone.opacity(0.25), lineWidth: 1))
-                }
-                .padding(.vertical, 14)
-                emberRule
-            }
-            // The band is the door to THE DIAL: a deliberate tap opens the
-            // lineup; a drag that merely starts here is a small loss (the
-            // whole plate above still tunes) for a discoverability win.
-            .contentShape(Rectangle())
-            .onTapGesture { showDial = true }
+            // NOW PLAYING + THE ROOM — the record with a face, and the crowd's
+            // push made visible: cover art, a readable title, and a live boost
+            // meter that surges as real votes land. A live show owns it.
+            NowPlayingBar(stream: stream, player: player,
+                          cover: services.nowPlayingCover, accent: accent,
+                          yourPick: yourPick)
+                // The band is the door to THE DIAL: a deliberate tap opens the
+                // lineup; a drag that merely starts here is a small loss (the
+                // whole plate above still tunes) for a discoverability win.
+                .contentShape(Rectangle())
+                .onTapGesture { showDial = true }
 
             ControlDeck(stream: stream, accent: accent, onTune: { direction in
                 tune(direction)
