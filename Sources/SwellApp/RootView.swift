@@ -37,6 +37,7 @@ private struct PlateView: View {
     @State private var showDial = false
     @State private var showSleep = false
     @State private var showShows = false
+    @State private var showMenu = false
     @State private var showRing = false
     @State private var showCallIn = false
     @State private var showBroadcast = false
@@ -250,6 +251,31 @@ private struct PlateView: View {
                     onClose: { showShows = false }
                 )
             }
+            .sheet(isPresented: $showMenu) {
+                BackstageSheet(
+                    accent: accent,
+                    isHost: isHost,
+                    broadcasting: broadcasting,
+                    onOpen: { door in
+                        showMenu = false
+                        // Present after the menu has fully dismissed — two
+                        // sheet transitions in the same beat drop the second.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                            switch door {
+                            case .dial: showDial = true
+                            case .ring: showRing = true
+                            case .line: showCallIn = true
+                            case .aircheck: showAircheck = true
+                            case .read: showRead = true
+                            case .sleep: showSleep = true
+                            case .host: showHostKey = true
+                            case .live: showBroadcast = true
+                            }
+                        }
+                    },
+                    onClose: { showMenu = false }
+                )
+            }
             .sheet(isPresented: $showProfile) {
                 ProfileSheet(stream: stream, accent: accent, onOpenRing: {
                     showProfile = false
@@ -370,18 +396,18 @@ private struct PlateView: View {
         @ViewBuilder label: () -> Label
     ) -> some View {
         Button(action: action) {
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 label()
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(height: 19)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(height: 21)
                 Text(caption)
-                    .font(.custom("Archivo Black", size: 7.5))
-                    .tracking(0.4)
-                    .foregroundStyle(bone.opacity(0.5))
+                    .font(.custom("Archivo Black", size: 9))
+                    .tracking(0.6)
+                    .foregroundStyle(bone.opacity(0.6))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
-            .frame(width: 34, height: 44)
+            .frame(width: 52, height: 48)
             .contentShape(Rectangle())
         }
     }
@@ -474,43 +500,31 @@ private struct PlateView: View {
                     }
                 }
                 Spacer(minLength: 6)
-                // GO LIVE: the host's transmit control (host devices only).
+                // Four clear doors, big targets, real words. Everything else
+                // lives one tap away behind BACKSTAGE — named, described,
+                // findable. No more six-glyph mystery row.
                 if isHost {
                     barButton("LIVE") { showBroadcast = true } label: {
                         Image(systemName: "antenna.radiowaves.left.and.right")
                             .foregroundStyle(broadcasting ? accent : bone.opacity(0.9))
                     }
                 }
-                // SOUND: HD / 3D / vinyl / cassette — how the station sounds.
-                // Neutral for the uncoloured modes (HD, 3D); accent-lit when a
-                // character mode (vinyl/cassette) is colouring the air.
                 barButton("SOUND") { showSound = true } label: {
                     Image(systemName: "opticaldisc")
                         .foregroundStyle(player.mode == .hd || player.mode == .spatial ? bone.opacity(0.9) : accent)
                 }
-                // THE RING: song battles. Bar label says what it IS — the
-                // brand name stays on the sheet header inside.
-                barButton("BATTLE") { showRing = true } label: {
-                    Text("VS")
-                        .font(.custom("Archivo Black", size: 14))
-                        .foregroundStyle(bone.opacity(0.9))
-                }
-                // THE LINE: hold-to-talk call-ins.
-                barButton("CALL") { showCallIn = true } label: {
-                    Image(systemName: "phone.fill").foregroundStyle(bone.opacity(0.9))
-                }
-                // AIRCHECK: hit record — tape the moment off the air (#30).
-                barButton("REC") { showAircheck = true } label: {
-                    Image(systemName: services.aircheck.isRecording ? "record.circle.fill" : "recordingtape")
-                        .foregroundStyle(services.aircheck.isRecording ? Color(red: 1, green: 0.32, blue: 0.28) : bone.opacity(0.9))
-                }
-                // THE READ: live audience research — what's resonating.
-                barButton("STATS") { showRead = true } label: {
-                    Image(systemName: "chart.bar.xaxis")
-                        .foregroundStyle(services.theRead.hasBreaking ? accent : bone.opacity(0.9))
+                barButton("SHOWS") { showShows = true } label: {
+                    Image(systemName: "play.tv.fill")
+                        .foregroundStyle(player.isLive ? accent : bone.opacity(0.9))
                 }
                 barButton("YOU") { showProfile = true } label: {
                     Image(systemName: "person.fill").foregroundStyle(bone.opacity(0.9))
+                }
+                barButton("MORE") { showMenu = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundStyle(
+                            (services.aircheck.isRecording || services.theRead.hasBreaking)
+                                ? accent : bone.opacity(0.9))
                 }
             }
             .padding(.top, 2)
@@ -523,7 +537,7 @@ private struct PlateView: View {
             // is LIVE, the show's picture takes the sign's place — radio with
             // a face — on the same AVPlayer that carries the sound.
             VStack(spacing: 10) {
-                if player.isLive, let show = player.liveShowPlayer {
+                if player.isLive, player.liveHasVideo, let show = player.liveShowPlayer {
                     LiveVideoSurface(player: show)
                         .aspectRatio(16.0 / 9.0, contentMode: .fit)
                         .frame(maxWidth: .infinity)
@@ -599,21 +613,9 @@ private struct PlateView: View {
                                 .animation(.snappy, value: np.boostScore)
                         }
                     }
-                    // SHOWS — live radio's visible door: who's on air, the
-                    // taped archive, host access. A Button, so its tap wins
-                    // over the band's DIAL gesture.
-                    Button { showShows = true } label: {
-                        Text("SHOWS")
-                            .font(.custom("Archivo Black", size: 10)).tracking(1.2)
-                            .foregroundStyle(player.isLive ? accent : bone.opacity(0.6))
-                            .padding(.horizontal, 9).padding(.vertical, 5)
-                            .overlay(Capsule().strokeBorder(
-                                (player.isLive ? accent : bone).opacity(player.isLive ? 0.6 : 0.25),
-                                lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
                     // THE DIAL door — the lineup card. The chip makes the
-                    // whole marquee band read as tappable (it is).
+                    // whole marquee band read as tappable (it is). SHOWS
+                    // moved to the top bar — one door, one place.
                     Text("DIAL ▾")
                         .font(.custom("Archivo Black", size: 10)).tracking(1.2)
                         .foregroundStyle(bone.opacity(0.6))

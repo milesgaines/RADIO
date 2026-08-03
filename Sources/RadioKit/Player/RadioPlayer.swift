@@ -122,6 +122,11 @@ public final class RadioPlayer: ObservableObject {
     /// video layer — live shows may carry VIDEO (the pro OBS→Mux path does);
     /// audio keeps flowing whether or not any layer is attached. nil off-air.
     public var liveShowPlayer: AVPlayer? { isLive ? avPlayer : nil }
+    /// True once the live item actually presents picture. A mic/DJ show is an
+    /// audio-only HLS stream — rendering a video layer for it is a dead black
+    /// rectangle, so the room keeps its sign until real video arrives.
+    @Published public private(set) var liveHasVideo = false
+    private var presentationObservation: NSKeyValueObservation?
     public private(set) var liveTitle: String = ""
     private var liveURL: URL?
     private var syntheticLevelsTask: Task<Void, Never>?
@@ -174,7 +179,11 @@ public final class RadioPlayer: ObservableObject {
         self.stream = stream
         // Tuning always releases a live show's grip on the player — the new
         // station's own live state (if any) re-asserts itself via the backend.
-        if isLive { isLive = false; liveURL = nil; liveTitle = "" }
+        if isLive {
+            isLive = false; liveURL = nil; liveTitle = ""
+            liveHasVideo = false
+            presentationObservation?.invalidate(); presentationObservation = nil
+        }
         syntheticLevelsTask?.cancel()
 
         stream.$nowPlaying
@@ -389,7 +398,20 @@ public final class RadioPlayer: ObservableObject {
         let player = avPlayer ?? AVPlayer()
         avPlayer = player
         installDriftCorrector(on: player)
-        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        let item = AVPlayerItem(url: url)
+        // Picture is earned, not assumed: only when the live item actually
+        // presents video does the room swap its sign for a screen. A mic/DJ
+        // show is audio-only HLS — its presentationSize stays .zero.
+        liveHasVideo = false
+        presentationObservation = item.observe(\.presentationSize, options: [.initial, .new]) {
+            [weak self] observed, _ in
+            let hasVideo = observed.presentationSize.width > 0
+            Task { @MainActor [weak self] in
+                guard let self, self.isLive else { return }
+                if self.liveHasVideo != hasVideo { self.liveHasVideo = hasVideo }
+            }
+        }
+        player.replaceCurrentItem(with: item)
         if isPlaying {
             if activateSession() {
                 player.play()
@@ -406,6 +428,9 @@ public final class RadioPlayer: ObservableObject {
     public func endLive() {
         guard isLive else { return }
         isLive = false
+        liveHasVideo = false
+        presentationObservation?.invalidate()
+        presentationObservation = nil
         liveURL = nil
         liveTitle = ""
         syntheticLevelsTask?.cancel()
@@ -1095,6 +1120,9 @@ public final class RadioPlayer: ObservableObject {
         driftObserver = nil
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
+        presentationObservation?.invalidate()
+        presentationObservation = nil
+        liveHasVideo = false
         avPlayer = nil
         streamTapContext = nil   // died with the player; load() rebuilds it per stream
         configureAudioSession()

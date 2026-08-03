@@ -184,6 +184,21 @@ struct ControlDeck: View {
             } label: {
                 VStack(spacing: 8) {
                     ZStack {
+                        // The transmit ring: a hairline dial around the orb
+                        // that BREATHES with the low end while the station
+                        // plays — the whole deck reads as a live transmitter.
+                        Circle()
+                            .strokeBorder(
+                                accent.opacity(player.isPlaying
+                                    ? 0.30 + Double(player.levels.bass) * 0.55 : 0),
+                                lineWidth: 2.5)
+                            .frame(width: 108, height: 108)
+                            .blur(radius: 0.6)
+                            .animation(.linear(duration: 0.08),
+                                       value: Int(player.levels.bass * 12))
+                        Circle()
+                            .strokeBorder(HumanTheme.bone.opacity(0.10), lineWidth: 1)
+                            .frame(width: 108, height: 108)
                         // A raised orb: lit from the upper-left, dropped on its
                         // own glow + shadow so it reads as a physical button.
                         Circle().fill(
@@ -191,19 +206,21 @@ struct ControlDeck: View {
                                 colors: player.isPlaying
                                     ? [HumanTheme.bone, Color(red: 0.78, green: 0.75, blue: 0.66)]
                                     : [Color(red: 1.0, green: 0.60, blue: 0.40), accent],
-                                center: .init(x: 0.34, y: 0.30), startRadius: 3, endRadius: 66)
+                                center: .init(x: 0.34, y: 0.30), startRadius: 3, endRadius: 74)
                         )
-                        Ellipse().fill(.white.opacity(0.32))
-                            .frame(width: 34, height: 18).blur(radius: 7)
-                            .offset(x: -9, y: -19)
+                        .frame(width: 92, height: 92)
+                        Ellipse().fill(.white.opacity(0.34))
+                            .frame(width: 40, height: 20).blur(radius: 7)
+                            .offset(x: -10, y: -23)
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 29, weight: .bold))
+                            .font(.system(size: 33, weight: .bold))
                             .foregroundStyle(HumanTheme.ink)
                             .offset(x: player.isPlaying ? 0 : 2)
                     }
-                    .frame(width: 80, height: 80)
-                    .shadow(color: (player.isPlaying ? HumanTheme.bone : accent).opacity(0.45), radius: 15, y: 5)
-                    .shadow(color: .black.opacity(0.5), radius: 8, y: 8)
+                    .frame(width: 108, height: 108)
+                    .shadow(color: (player.isPlaying ? accent : accent).opacity(player.isPlaying ? 0.30 : 0.45),
+                            radius: 17, y: 5)
+                    .shadow(color: .black.opacity(0.5), radius: 9, y: 9)
                     Text(player.isPlaying ? "ON AIR" : "TUNE IN")
                         .font(.custom("Archivo Black", size: 11))
                         .tracking(1.6)
@@ -214,7 +231,7 @@ struct ControlDeck: View {
             .frame(maxWidth: .infinity)
 
             // Tap: boost. Hold: send it out to someone — radio's oldest ritual.
-            deckButton(icon: "arrow.up", label: "BOOST", tint: accent) {
+            deckButton(icon: "arrow.up", label: "BOOST", tint: accent, glow: accent) {
                 if let id = stream.nowPlaying?.track.id {
                     auth.requireSignIn(reason: "to boost this record") {
                         services.castMyVote(.boost, on: id)
@@ -244,19 +261,8 @@ struct ControlDeck: View {
             Text("BURY").font(.custom("Archivo Black", size: 9)).tracking(1).foregroundStyle(HumanTheme.dim)
             Text("— YOU PROGRAM THE STATION").font(.custom("Archivo Black", size: 9)).tracking(0.6)
                 .foregroundStyle(HumanTheme.dim.opacity(0.8))
-            Spacer(minLength: 8)
-            // The night-stand door: clock, low ember, sleep timer.
-            Button(action: onSleep) {
-                HStack(spacing: 4) {
-                    Image(systemName: "moon.fill").font(.system(size: 8, weight: .heavy))
-                    Text("SLEEP").font(.custom("Archivo Black", size: 9)).tracking(1)
-                }
-                .foregroundStyle(HumanTheme.dim)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .overlay(Capsule().strokeBorder(HumanTheme.dim.opacity(0.35), lineWidth: 1))
-            }
-            .buttonStyle(.plain)
         }
+        .frame(maxWidth: .infinity)
         .lineLimit(1).minimumScaleFactor(0.7)
         }
     }
@@ -264,19 +270,30 @@ struct ControlDeck: View {
     private func deckButton(
         icon: String, label: String,
         tint: Color = HumanTheme.bone,
+        glow: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             VStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 23, weight: .semibold))
+                    .font(.system(size: 25, weight: .bold))
                     .foregroundStyle(tint)
-                    .frame(width: 62, height: 62)
+                    .frame(width: 66, height: 66)
                     .background(DeckKey.raised)
+                    .overlay(
+                        // A lit key: the accent smoulders up from the key's
+                        // base — BOOST reads armed before it's ever touched.
+                        Circle()
+                            .fill(RadialGradient(
+                                colors: [(glow ?? .clear).opacity(glow == nil ? 0 : 0.28), .clear],
+                                center: .init(x: 0.5, y: 0.95),
+                                startRadius: 2, endRadius: 44))
+                            .allowsHitTesting(false)
+                    )
                 Text(label)
                     .font(.custom("Archivo Black", size: 11))
                     .tracking(1.4)
-                    .foregroundStyle(HumanTheme.dim)
+                    .foregroundStyle(glow == nil ? HumanTheme.dim : HumanTheme.bone.opacity(0.75))
             }
         }
         .buttonStyle(PressKey())
