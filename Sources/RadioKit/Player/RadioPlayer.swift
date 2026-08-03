@@ -604,11 +604,12 @@ public final class RadioPlayer: ObservableObject {
                 // flutter — felt, not seasick (the old 7-cent wow was too much).
                 cents = 3.0 * sin(2 * .pi * 0.55 * t) + 1.0 * sin(2 * .pi * 5.5 * t)
             case .cassette:
-                // Capstan flutter is the cassette signature — a faster wobble
-                // with a slow bias drift riding underneath. Present, musical.
-                cents = 3.5 * sin(2 * .pi * 1.4 * t)
-                      + 2.5 * sin(2 * .pi * 8.0 * t)
-                      + 1.5 * sin(2 * .pi * 0.3 * t)
+                // Capstan flutter, per a real Type-I tape: a 1.8 Hz wow and a
+                // 15 Hz flutter — that fast component is the cassette signature
+                // I was missing — over a slow bias drift. Musical, not seasick.
+                cents = 4.0 * sin(2 * .pi * 1.8 * t)
+                      + 2.0 * sin(2 * .pi * 15.0 * t)
+                      + 1.2 * sin(2 * .pi * 0.3 * t)
             case .hd, .spatial:
                 cents = 0
             }
@@ -651,11 +652,14 @@ public final class RadioPlayer: ObservableObject {
             set(2, .parametric, 3_000, 1.2, 0.5) // keep presence alive
             set(3, .highShelf,  11_000, 0.5, -4) // gentle air rolloff, still open
             eq.globalGain = 1
-        case .cassette:  // band-limited, boxy mids, dull top — a real tape curve
-            set(0, .lowShelf,   90, 0.6, -3.5)   // thin lows
-            set(1, .parametric, 240, 1.1, 1.5)   // boxy low-mid body
-            set(2, .parametric, 3_500, 1.2, -2)  // presence dip
-            set(3, .highShelf,  6_500, 0.5, -10) // dull cassette top
+        case .cassette:  // a real Type-I tape curve: thin lows, a touch of
+                         // presence, a GENTLE air rolloff — the hiss and flutter
+                         // make it tape, not a blanket over the top (the old
+                         // -10 at 6.5k just sounded muffled, not analog).
+            set(0, .lowShelf,   60, 0.6, -2)     // thin lows (tape HP ~40 Hz)
+            set(1, .parametric, 220, 1.0, 1.0)   // slight low-mid body
+            set(2, .parametric, 3_000, 0.6, 1.5) // presence lift (per real tape)
+            set(3, .highShelf,  11_000, 0.5, -4) // gentle air rolloff to ~14 kHz
             eq.globalGain = 1
         }
     }
@@ -989,10 +993,16 @@ public final class RadioPlayer: ObservableObject {
         let n = Int(frames)
         let channels = Int(ambienceFormat.channelCount)
 
-        var lpPrev: Float = 0      // one-pole low-pass state (vinyl fry)
-        var hpPrev: Float = 0      // differentiator state (cassette hiss shaping)
+        // Surface noise is BAND-PASSED, not just low-passed: real vinyl fry
+        // lives ~200 Hz–3 kHz (measured, per the reference recipes), so a
+        // sub-200 highpass state feeds a ~3 kHz lowpass state.
+        var vHP: Float = 0         // vinyl fry highpass state (~250 Hz)
+        var vLP: Float = 0         // vinyl fry lowpass state (~2.5 kHz)
+        var cHP: Float = 0         // cassette hiss highpass state (gentle, not a razor)
         var click: Float = 0       // current needle-click amplitude
         var clickDecay: Float = 0.7
+        var dust: Float = 0        // a short dust-scratch burst, decaying
+        var dustDecay: Float = 0.8
         var phase = 0.0
         let rumbleInc = 2 * Double.pi * 33.0 / sr   // ~33 Hz turntable rumble
         let humInc = 2 * Double.pi * 62.0 / sr      // ~62 Hz cassette motor hum
@@ -1002,19 +1012,33 @@ public final class RadioPlayer: ObservableObject {
             var s: Float
             switch mode {
             case .vinyl:
-                lpPrev += (w - lpPrev) * 0.08
-                let fry = lpPrev * 0.20 + w * 0.003
-                if Float.random(in: 0..<1) < 0.00006 {           // ~2–3 pops/sec, a bed not a machine-gun
-                    click = Float.random(in: 0.05...0.28) * (Bool.random() ? 1 : -1)
+                // Band-pass the fry to the surface-noise band.
+                vHP += (w - vHP) * 0.035                          // HP ~250 Hz
+                let bp = w - vHP
+                vLP += (bp - vLP) * 0.34                          // LP ~2.4 kHz
+                let fry = vLP * 0.5
+                // Clicks & pops — Poisson-ish, ~5/sec (a warm-vinyl bed).
+                if Float.random(in: 0..<1) < 0.00012 {
+                    click = Float.random(in: 0.05...0.30) * (Bool.random() ? 1 : -1)
                     clickDecay = Float.random(in: 0.55...0.85)
                 }
                 click *= clickDecay
+                // Dust particles — sparse short scratch bursts with a fast tail.
+                if Float.random(in: 0..<1) < 0.00003 {
+                    dust = Float.random(in: 0.06...0.16) * (Bool.random() ? 1 : -1)
+                    dustDecay = Float.random(in: 0.82...0.94)
+                }
+                dust = dust * dustDecay + w * abs(dust) * 0.6     // noisy while it rings
                 phase += rumbleInc
-                s = fry + click + Float(sin(phase)) * 0.010
+                s = fry + click + dust + Float(sin(phase)) * 0.010
             case .cassette:
-                let hp = w - hpPrev; hpPrev = w                  // 6 dB/oct HP → bright tape hiss
+                // Tape hiss: a GENTLE one-pole highpass (high-mid weighted),
+                // not a first-difference razor — real hiss keeps body and runs
+                // out to ~14 kHz, it doesn't scream at the very top.
+                cHP += (w - cHP) * 0.5                            // HP ~3.5 kHz
+                let hiss = w - cHP
                 phase += humInc
-                s = hp * 0.9 * 0.028 + Float(sin(phase)) * 0.005
+                s = hiss * 0.03 + Float(sin(phase)) * 0.005
             case .hd, .spatial:
                 s = 0
             }
