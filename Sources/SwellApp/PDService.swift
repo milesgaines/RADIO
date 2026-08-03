@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Combine
 import Supabase
 import RadioKit
@@ -126,6 +127,125 @@ final class PDService: ObservableObject {
                 p_id: drop.id.uuidString, p_active: active, p_key: hostKey
             )).execute()
             await loadDrops(stationID: stationID)
+        } catch { note = "NO SIGNAL — TRY AGAIN" }
+    }
+
+    // MARK: - Loading the library
+
+    private struct AddParams: Encodable {
+        let p_key: String; let p_station: String; let p_title: String
+        let p_artist: String; let p_duration: Double; let p_url: String
+    }
+
+    /// A readable title out of a URL or filename — "my_track-final.mp3" →
+    /// "my track final". The PD sees exactly what will air.
+    private static func titleGuess(from name: String) -> String {
+        var base = name
+        if let q = base.firstIndex(of: "?") { base = String(base[..<q]) }
+        base = (base as NSString).lastPathComponent
+        base = (base as NSString).deletingPathExtension
+        base = base.removingPercentEncoding ?? base
+        base = base.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        return base.isEmpty ? "UNTITLED" : base
+    }
+
+    /// The shared clock NEEDS a real duration — probe the asset before filing.
+    private static func probeDuration(_ url: URL) async -> Double? {
+        let asset = AVURLAsset(url: url)
+        guard let d = try? await asset.load(.duration) else { return nil }
+        let secs = d.seconds
+        return (secs.isFinite && secs > 0) ? secs : nil
+    }
+
+    /// Bulk add-by-URL: one line per record. Each URL is probed for a real
+    /// duration (the shared clock depends on it), then filed key-gated.
+    func addByURLs(_ text: String, stationID: UUID) async {
+        let lines = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("http") }
+        guard !lines.isEmpty else { note = "NO URLS — ONE PER LINE"; return }
+        var added = 0, failed = 0
+        for line in lines {
+            guard let url = URL(string: line),
+                  let duration = await Self.probeDuration(url) else { failed += 1; continue }
+            do {
+                let tid: UUID? = try await client.rpc("radio_add_track", params: AddParams(
+                    p_key: hostKey, p_station: stationID.uuidString,
+                    p_title: Self.titleGuess(from: line), p_artist: "",
+                    p_duration: duration, p_url: line
+                )).execute().value
+                tid != nil ? (added += 1) : (failed += 1)
+            } catch { failed += 1 }
+            note = "LOADING… \(added) IN · \(failed) REFUSED"
+        }
+        note = "LIBRARY: \(added) ADDED" + (failed > 0 ? " · \(failed) REFUSED (BAD URL OR NO DURATION)" : "")
+        await loadCatalog(stationID: stationID)
+    }
+
+    /// Upload masters from the phone (Files app): each file is probed for
+    /// duration locally, shipped to the key-gated upload function, then filed.
+    func uploadFiles(_ files: [URL], stationID: UUID) async {
+        var added = 0, failed = 0
+        for file in files {
+            let scoped = file.startAccessingSecurityScopedResource()
+            defer { if scoped { file.stopAccessingSecurityScopedResource() } }
+            guard let duration = await Self.probeDuration(file),
+                  let data = try? Data(contentsOf: file),
+                  data.count <= 25 * 1024 * 1024 else { failed += 1; continue }
+            guard let publicURL = await upload(data: data, filename: file.lastPathComponent)
+            else { failed += 1; continue }
+            do {
+                let tid: UUID? = try await client.rpc("radio_add_track", params: AddParams(
+                    p_key: hostKey, p_station: stationID.uuidString,
+                    p_title: Self.titleGuess(from: file.lastPathComponent), p_artist: "",
+                    p_duration: duration, p_url: publicURL
+                )).execute().value
+                tid != nil ? (added += 1) : (failed += 1)
+            } catch { failed += 1 }
+            note = "UPLOADING… \(added) IN · \(failed) REFUSED"
+        }
+        note = "LIBRARY: \(added) UPLOADED" + (failed > 0 ? " · \(failed) REFUSED (FORMAT, SIZE, OR SIGNAL)" : "")
+        await loadCatalog(stationID: stationID)
+    }
+
+    private func upload(data: Data, filename: String) async -> String? {
+        guard let endpoint = URL(string:
+            "https://tgkgdquivdoquxamtgcr.supabase.co/functions/v1/track-upload")
+        else { return nil }
+        let boundary = "radi0-\(UUID().uuidString)"
+        var body = Data()
+        func field(_ name: String, _ value: String) {
+            body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!)
+        }
+        field("key", hostKey)
+        body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.setValue(Self.publishableKey, forHTTPHeaderField: "apikey")
+        req.httpBody = body
+        guard let (respData, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        struct Reply: Decodable { let ok: Bool?; let url: String? }
+        return (try? JSONDecoder().decode(Reply.self, from: respData))?.url
+    }
+
+    /// Pull a record from this station's rotation (unlink — history and other
+    /// stations keep it; the server refuses to empty a station entirely).
+    func removeFromRotation(_ track: CatalogTrack, stationID: UUID) async {
+        struct P: Encodable { let p_key: String; let p_station: String; let p_track: String }
+        do {
+            let ok: Bool = try await client.rpc("radio_remove_station_track", params: P(
+                p_key: hostKey, p_station: stationID.uuidString, p_track: track.id.uuidString
+            )).execute().value
+            note = ok ? "PULLED — \(track.title.uppercased())"
+                      : "REFUSED — LAST RECORD OR KEY REJECTED"
+            await loadCatalog(stationID: stationID)
         } catch { note = "NO SIGNAL — TRY AGAIN" }
     }
 }

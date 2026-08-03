@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import RadioKit
 
 /// PD DESK — the Program Director's chair, in the product. Schedule a first
@@ -12,6 +13,9 @@ struct PDDeskSheet: View {
     var onClose: () -> Void = {}
 
     @State private var search = ""
+    @State private var urlPaste = ""
+    @State private var showFilePicker = false
+    @State private var loadingLibrary = false
 
     private let ink = Color(red: 0.039, green: 0.039, blue: 0.047)
     private let bone = Color(red: 0.945, green: 0.925, blue: 0.878)
@@ -114,7 +118,7 @@ struct PDDeskSheet: View {
                                     .foregroundStyle(dim)
                             } else {
                                 ForEach(filtered.prefix(40)) { track in
-                                    HStack(spacing: 12) {
+                                    HStack(spacing: 10) {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(track.title)
                                                 .font(.custom("Archivo Black", size: 13))
@@ -127,6 +131,17 @@ struct PDDeskSheet: View {
                                         chip("QUEUE", lit: true) {
                                             Task { await desk.premiere(track, stationID: stream.station.id) }
                                         }
+                                        // Pull from THIS station's rotation (unlink, not delete).
+                                        Button {
+                                            Task { await desk.removeFromRotation(track, stationID: stream.station.id) }
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .foregroundStyle(dim)
+                                                .frame(width: 28, height: 28)
+                                                .overlay(Rectangle().strokeBorder(dim.opacity(0.3), lineWidth: 1))
+                                        }
+                                        .buttonStyle(.plain)
                                     }
                                 }
                                 if filtered.count > 40 {
@@ -134,6 +149,42 @@ struct PDDeskSheet: View {
                                         .font(.custom("Archivo Black", size: 9)).tracking(1)
                                         .foregroundStyle(dim.opacity(0.7))
                                 }
+                            }
+                        }
+
+                        // ── LOAD THE LIBRARY ──────────────────────────────
+                        VStack(alignment: .leading, spacing: 10) {
+                            head("LOAD THE LIBRARY")
+                            Text("Records enter this station's rotation the moment they land. URLs: one per line, direct audio links.")
+                                .font(.system(size: 12)).foregroundStyle(dim)
+                            TextEditor(text: $urlPaste)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(bone)
+                                .scrollContentBackground(.hidden)
+                                .frame(height: 76)
+                                .padding(6)
+                                .background(Rectangle().fill(.white.opacity(0.04)))
+                                .overlay(Rectangle().strokeBorder(bone.opacity(0.15), lineWidth: 1))
+                                .overlay(alignment: .topLeading) {
+                                    if urlPaste.isEmpty {
+                                        Text("PASTE AUDIO URLS — ONE PER LINE")
+                                            .font(.custom("Archivo Black", size: 10)).tracking(1)
+                                            .foregroundStyle(dim.opacity(0.6))
+                                            .padding(10)
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+                            HStack(spacing: 10) {
+                                chip(loadingLibrary ? "LOADING…" : "ADD URLS", lit: true) {
+                                    guard !loadingLibrary else { return }
+                                    loadingLibrary = true
+                                    Task {
+                                        await desk.addByURLs(urlPaste, stationID: stream.station.id)
+                                        urlPaste = ""
+                                        loadingLibrary = false
+                                    }
+                                }
+                                chip("UPLOAD FILES") { showFilePicker = true }
                             }
                         }
 
@@ -169,6 +220,16 @@ struct PDDeskSheet: View {
         }
         .preferredColorScheme(.dark)
         .task { await desk.refresh(stationID: stream.station.id) }
+        .fileImporter(isPresented: $showFilePicker,
+                      allowedContentTypes: [.audio],
+                      allowsMultipleSelection: true) { result in
+            guard case .success(let files) = result, !files.isEmpty else { return }
+            loadingLibrary = true
+            Task {
+                await desk.uploadFiles(files, stationID: stream.station.id)
+                loadingLibrary = false
+            }
+        }
     }
 
     private func head(_ title: String) -> some View {
