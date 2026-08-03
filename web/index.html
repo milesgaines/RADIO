@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RADI0 — FAN-VOTED LIVE RADIO</title>
+<meta name="description" content="RADI0. Fan-voted live radio. The crowd runs the dial. Everyone hears the same second.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Gasoek+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:   #0a0a0c;
+    --bone:  #f1ecdf;
+    --ember: #ff5c2e;
+    --hair:  rgba(241, 236, 223, 0.22);
+    --dim:   rgba(241, 236, 223, 0.45);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink);
+    color: var(--bone);
+    font-family: 'Archivo Black', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100svh;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  header { display: flex; align-items: center; padding: 1.25rem 1.5rem; }
+  .wordmark {
+    display: flex; align-items: center;
+    font-size: 1.3rem; letter-spacing: 0.08em; line-height: 1;
+    user-select: none;
+  }
+  .wordmark svg { width: 1em; height: 1em; display: block; margin-left: 0.1em; }
+
+  main {
+    flex: 1;
+    width: 100%;
+    max-width: 56rem;
+    margin: 0 auto;
+    padding: 1rem 1.25rem 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(1.4rem, 4vh, 2.4rem);
+    text-align: center;
+  }
+
+  /* ---- hero: RADI + the ring-zero, ember glow behind ---- */
+  .hero {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Gasoek One', sans-serif;
+    font-size: clamp(4.6rem, 24vw, 12rem);
+    line-height: 0.9;
+    letter-spacing: 0.02em;
+    user-select: none;
+  }
+  .hero::before {
+    content: "";
+    position: absolute; inset: -18%;
+    background: radial-gradient(closest-side, rgba(255, 92, 46, 0.16), transparent 70%);
+    pointer-events: none;
+  }
+  .hero svg { width: 0.92em; height: 0.92em; display: block; margin-left: 0.08em; position: relative; }
+  .tagline {
+    font-size: clamp(0.58rem, 2.4vw, 0.72rem);
+    letter-spacing: 0.34em; text-indent: 0.34em;
+    color: var(--dim);
+  }
+
+  /* ---- ON AIR NOW strip ---- */
+  .onair {
+    width: 100%; max-width: 36rem;
+    text-align: left;
+    border-bottom: 1px solid var(--hair);
+  }
+  .onair-head {
+    display: flex; align-items: center; gap: 0.55rem;
+    font-size: 0.6rem; letter-spacing: 0.35em;
+    color: var(--ember);
+    padding-bottom: 0.8rem;
+  }
+  .onair-dot {
+    width: 0.45rem; height: 0.45rem; border-radius: 50%;
+    background: var(--ember); flex: none;
+    animation: blink 2.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  .st-row {
+    display: grid;
+    grid-template-columns: 5.4rem 1fr;
+    grid-template-rows: auto auto;
+    column-gap: 1.1rem; row-gap: 0.3rem;
+    align-items: center;
+    padding: 0.85rem 0;
+    border-top: 1px solid var(--hair);
+  }
+  .st-dial {
+    grid-row: span 2;
+    font-family: 'Gasoek One', sans-serif;
+    font-size: 1.45rem; line-height: 1;
+    color: var(--acc, var(--ember));
+  }
+  .st-name { font-size: 0.56rem; letter-spacing: 0.3em; color: var(--dim); }
+  .st-np {
+    font-size: 0.72rem; letter-spacing: 0.12em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .st-np.none { color: var(--dim); }
+
+  /* ---- actions ---- */
+  .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.8rem; }
+  .btn {
+    display: inline-block;
+    border: 1px solid var(--hair);
+    padding: 1rem 2rem;
+    font-size: 0.62rem; letter-spacing: 0.35em; text-indent: 0.35em;
+    white-space: nowrap;
+    transition: border-color 0.2s, color 0.2s;
+  }
+  .btn:hover { border-color: var(--bone); }
+  .btn-ember { border-color: rgba(255, 92, 46, 0.55); color: var(--ember); }
+  .btn-ember:hover { border-color: var(--ember); }
+
+  footer {
+    display: flex; flex-direction: column; align-items: center; gap: 0.9rem;
+    padding: 2rem 1.5rem 2.5rem;
+    text-align: center;
+  }
+  .same-second { font-size: 0.6rem; letter-spacing: 0.3em; color: rgba(241, 236, 223, 0.28); }
+  .foot-links { display: flex; align-items: center; gap: 0.9rem; }
+  .foot-links a {
+    font-size: 0.6rem; letter-spacing: 0.3em;
+    color: var(--dim);
+    border-bottom: 1px solid transparent;
+    padding-bottom: 0.2rem;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .foot-links a:hover { color: var(--bone); border-bottom-color: var(--hair); }
+  .foot-sep { color: rgba(241, 236, 223, 0.28); font-size: 0.6rem; }
+
+  @media (max-width: 420px) {
+    .btn { padding: 0.9rem 1.4rem; font-size: 0.56rem; letter-spacing: 0.28em; text-indent: 0.28em; }
+    .st-row { grid-template-columns: 4.4rem 1fr; column-gap: 0.8rem; }
+    .st-dial { font-size: 1.2rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wordmark" aria-label="RADI0">
+    RADI<!-- the zero is a record: a ring with a hole -->
+    <svg viewBox="0 0 100 100" role="img" aria-label="0" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="34" fill="none" stroke="#ff5c2e" stroke-width="28"/>
+    </svg>
+  </div>
+</header>
+
+<main>
+  <h1 class="hero" aria-label="RADI0">
+    RADI<!-- the zero is a record: a ring with a hole -->
+    <svg viewBox="0 0 100 100" role="img" aria-label="0" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="34" fill="none" stroke="#ff5c2e" stroke-width="28"/>
+    </svg>
+  </h1>
+
+  <p class="tagline">FAN-VOTED LIVE RADIO &middot; THE CROWD RUNS THE DIAL</p>
+
+  <section class="onair" aria-label="ON AIR NOW">
+    <div class="onair-head"><span class="onair-dot"></span>ON AIR NOW</div>
+    <div id="strip"></div>
+  </section>
+
+  <nav class="actions" aria-label="RADI0">
+    <a class="btn btn-ember" href="listen.html">LISTEN</a>
+    <a class="btn" href="dashboard.html">THE BOARD</a>
+    <a class="btn" href="https://testflight.apple.com/join/6k17h8NU">GET THE APP</a>
+  </nav>
+</main>
+
+<footer>
+  <div class="same-second">EVERYONE HEARS THE SAME SECOND.</div>
+  <nav class="foot-links" aria-label="LEGAL">
+    <a href="privacy.html">PRIVACY</a>
+    <span class="foot-sep">&middot;</span>
+    <a href="support.html">SUPPORT</a>
+  </nav>
+</footer>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Publishable key — public by design. RLS is the boundary: anonymous clients
+// can only read the broadcast tables.
+const SUPABASE_URL = 'https://tgkgdquivdoquxamtgcr.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_JYYXKdhcGnEP5curdG_pLg_XVcy9-ii';
+
+// Three fixed stations; the fourth (THE WAVE) is discovered at runtime — any
+// station broadcasting under an id we don't know is the 247.
+const STATIONS = [
+  { id: 'bb940e5c-0a54-852c-b00c-81434978757c', dial: 'PWR',  name: 'PWR DAMIZZA',     acc: '#ff5c2e' },
+  { id: 'df29c50a-76a7-8f76-bb6d-7e3434d2036e', dial: '78',   name: 'THE VAULT',       acc: '#4db8ff' },
+  { id: 'ba13d3b9-a9c7-807d-b73b-065938f474b5', dial: '1200', name: 'THE UNDERGROUND', acc: '#5ceb87' },
+  { id: null,                                    dial: '247',  name: 'THE WAVE',        acc: '#db70ff' },
+];
+const WAVE = STATIONS[3];
+
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+const nowPlaying = new Map(); // station_id -> radio_now_playing row
+
+// Postgres timestamptz arrives in several shapes; not needed for display here,
+// but kept minimal on purpose — this strip only shows what the server says.
+
+function buildStrip() {
+  const strip = document.getElementById('strip');
+  strip.textContent = '';
+  for (const st of STATIONS) {
+    const row = document.createElement('div');
+    row.className = 'st-row';
+    row.style.setProperty('--acc', st.acc);
+    const dial = document.createElement('span');
+    dial.className = 'st-dial';
+    dial.textContent = st.dial;
+    const name = document.createElement('span');
+    name.className = 'st-name';
+    name.textContent = st.name;
+    const np = document.createElement('span');
+    np.className = 'st-np none';
+    np.id = 'np-' + st.dial;
+    np.textContent = 'NO SIGNAL';
+    row.append(dial, name, np);
+    strip.appendChild(row);
+  }
+}
+
+function render() {
+  for (const st of STATIONS) {
+    const el = document.getElementById('np-' + st.dial);
+    const row = st.id ? nowPlaying.get(st.id) : null;
+    if (row && row.title) {
+      el.textContent = `${(row.title || 'UNTITLED').toUpperCase()} — ${(row.artist || 'UNKNOWN').toUpperCase()}`;
+      el.classList.remove('none');
+    } else {
+      el.textContent = 'NO SIGNAL';
+      el.classList.add('none');
+    }
+  }
+}
+
+async function refresh() {
+  try {
+    const { data, error } = await sb.from('radio_now_playing').select('*');
+    if (error || !data) return;
+    for (const row of data) {
+      // Unknown id on air = THE WAVE. First unknown claims the slot.
+      if (!STATIONS.some((s) => s.id === row.station_id)) {
+        if (!WAVE.id) WAVE.id = row.station_id;
+      }
+      nowPlaying.set(row.station_id, row);
+    }
+    render();
+  } catch (_) { /* the strip just keeps its last honest state */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refresh();
+});
+
+buildStrip();
+refresh();
+setInterval(refresh, 15000);
+</script>
+
+</body>
+</html>
