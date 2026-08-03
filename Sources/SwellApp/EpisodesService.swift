@@ -25,6 +25,9 @@ final class EpisodesService: ObservableObject {
     @Published private(set) var episodes: [Episode] = []
     @Published private(set) var playingID: UUID?
     @Published private(set) var loaded = false
+    /// The replay's AVPlayer, exposed so the theater can attach video —
+    /// taped shows carry picture when the broadcast did.
+    private(set) var currentPlayer: AVPlayer?
 
     private static let projectURL = URL(string: "https://tgkgdquivdoquxamtgcr.supabase.co")!
     private static let publishableKey = "sb_publishable_JYYXKdhcGnEP5curdG_pLg_XVcy9-ii"
@@ -72,6 +75,7 @@ final class EpisodesService: ObservableObject {
         radio.pause()
         let p = AVPlayer(url: episode.hlsURL)
         player = p
+        currentPlayer = p
         playingID = episode.id
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
@@ -89,6 +93,7 @@ final class EpisodesService: ObservableObject {
         }
         player?.pause()
         player = nil
+        currentPlayer = nil
         playingID = nil
     }
 }

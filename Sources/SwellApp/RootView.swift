@@ -519,13 +519,26 @@ private struct PlateView: View {
 
             // THE SIGN — the station call, extruded like a lit marquee number,
             // breathing with the low end and sliding under the finger on a
-            // tune. This is the hero; everything else frames it.
+            // tune. This is the hero; everything else frames it. When a host
+            // is LIVE, the show's picture takes the sign's place — radio with
+            // a face — on the same AVPlayer that carries the sound.
             VStack(spacing: 10) {
-                dimensionalNumber(dialLabel.number)
-                    .scaleEffect(1 + CGFloat(player.levels.bass) * 0.03)
-                    .animation(.linear(duration: 0.08), value: Int(player.levels.bass * 10))
-                    .contentTransition(.opacity)
-                    .animation(.easeInOut(duration: 0.45), value: dialLabel.number)
+                if player.isLive, let show = player.liveShowPlayer {
+                    LiveVideoSurface(player: show)
+                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .overlay(RoundedRectangle(cornerRadius: 18)
+                            .strokeBorder(accent.opacity(0.55), lineWidth: 1.5))
+                        .shadow(color: accent.opacity(0.35), radius: 24, y: 8)
+                        .padding(.horizontal, 22)
+                } else {
+                    dimensionalNumber(dialLabel.number)
+                        .scaleEffect(1 + CGFloat(player.levels.bass) * 0.03)
+                        .animation(.linear(duration: 0.08), value: Int(player.levels.bass * 10))
+                        .contentTransition(.opacity)
+                        .animation(.easeInOut(duration: 0.45), value: dialLabel.number)
+                }
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(stream.station.name.uppercased())
                         .font(.custom("Archivo Black", size: 24))

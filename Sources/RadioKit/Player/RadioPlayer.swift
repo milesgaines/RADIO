@@ -118,6 +118,10 @@ public final class RadioPlayer: ObservableObject {
     /// True while a human owns the air (an HLS live show). Rotation clock
     /// updates are ignored until the show ends.
     @Published public private(set) var isLive = false
+    /// The AVPlayer carrying the live show, exposed so the app can attach a
+    /// video layer — live shows may carry VIDEO (the pro OBS→Mux path does);
+    /// audio keeps flowing whether or not any layer is attached. nil off-air.
+    public var liveShowPlayer: AVPlayer? { isLive ? avPlayer : nil }
     public private(set) var liveTitle: String = ""
     private var liveURL: URL?
     private var syntheticLevelsTask: Task<Void, Never>?

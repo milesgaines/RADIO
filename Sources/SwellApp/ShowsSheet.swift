@@ -116,6 +116,20 @@ struct ShowsSheet: View {
         .preferredColorScheme(.dark)
         .task { await shelf.refresh() }
         .onDisappear { shelf.stop() }   // never leave a replay singing offscreen
+        // Taped shows carry the broadcast's picture: playing one opens the
+        // theater (VOD, so system controls belong). Closing it stops the tape.
+        .fullScreenCover(isPresented: Binding(
+            get: { shelf.playingID != nil },
+            set: { if !$0 { shelf.stop() } }
+        )) {
+            if let p = shelf.currentPlayer {
+                ReplayTheater(
+                    player: p,
+                    title: shelf.episodes.first(where: { $0.id == shelf.playingID })?.title ?? "REPLAY",
+                    onClose: { shelf.stop() }
+                )
+            }
+        }
     }
 
     private func episodeRow(_ ep: EpisodesService.Episode) -> some View {
