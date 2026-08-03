@@ -271,23 +271,14 @@ struct ControlDeck: View {
         .background(deckTray)
     }
 
-    /// The control surface the transport sits on — a recessed warm-dark panel,
-    /// top-lit with a hairline. Frames the deck as one device, not five buttons.
+    /// The control surface the transport sits on — a brushed-metal faceplate
+    /// with corner screws, the front of a vintage receiver.
     private var deckTray: some View {
-        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
-        return shape
-            .fill(LinearGradient(
-                colors: [Color(red: 0.11, green: 0.10, blue: 0.095).opacity(0.92),
-                         Color(red: 0.05, green: 0.045, blue: 0.04).opacity(0.92)],
-                startPoint: .top, endPoint: .bottom))
-            .overlay(shape.strokeBorder(HumanTheme.bone.opacity(0.10), lineWidth: 1))
-            .overlay(alignment: .top) {
-                shape.inset(by: 1)
-                    .stroke(HumanTheme.bone.opacity(0.13), lineWidth: 1)
-                    .mask(LinearGradient(colors: [.white, .clear],
-                                         startPoint: .top, endPoint: .center))
-            }
-            .shadow(color: .black.opacity(0.4), radius: 10, y: 6)
+        BrushedFaceplate(cornerRadius: 28)
+            .overlay(alignment: .topLeading) { Screw().padding(9) }
+            .overlay(alignment: .topTrailing) { Screw().padding(9) }
+            .overlay(alignment: .bottomLeading) { Screw().padding(9) }
+            .overlay(alignment: .bottomTrailing) { Screw().padding(9) }
     }
 
     private func deckButton(
@@ -296,64 +287,72 @@ struct ControlDeck: View {
         glow: Color? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        // Warm dark glyph, ENGRAVED into the ivory cap: a light lower lip under
+        // a dark face reads as a groove pressed into plastic.
+        let engraved = Color(red: 0.17, green: 0.13, blue: 0.09)
+        return Button(action: action) {
             VStack(spacing: 8) {
                 ZStack {
-                    DeckKey.vintage(glow: glow)
-                    // The glyph, molded into the cap: a dark copy dropped
-                    // below the tinted face reads as raised plastic/metal.
+                    DeckKey.keycap(tint: glow)
                     Image(systemName: icon)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.black.opacity(0.6))
-                        .offset(y: 1.4)
+                        .font(.system(size: 22, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .offset(y: 1.2)
                     Image(systemName: icon)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(tint)
+                        .font(.system(size: 22, weight: .heavy))
+                        .foregroundStyle(engraved)
                 }
-                .frame(width: 64, height: 58)
+                .frame(width: 64, height: 60)
                 Text(label)
                     .font(.custom("Archivo Black", size: 11))
                     .tracking(1.4)
-                    .foregroundStyle(glow == nil ? HumanTheme.dim : HumanTheme.bone.opacity(0.75))
+                    .foregroundStyle(glow == nil ? HumanTheme.dim : HumanTheme.bone.opacity(0.8))
             }
         }
         .buttonStyle(PressKey())
     }
 }
 
-/// A vintage transport key: a chamfered metal cap, warm and dark, lit from
-/// above — a top-bevel highlight, a bottom-inner shadow, a hairline rim, a
-/// soft specular, dropped on its own shadow. The cassette-deck button feel.
+/// A vintage transport keycap: a warm ivory (or lit-amber) dome seated in a
+/// recessed dark well — the tape-deck / vintage-synth key. Domed radial
+/// highlight, bright top rim, a soft specular, casting into the well below it.
+/// nil tint = ivory; a tint = a lit function key (BOOST glows warm amber).
 enum DeckKey {
-    static func vintage(glow: Color? = nil) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
-        return shape
-            .fill(LinearGradient(
-                colors: [Color(red: 0.20, green: 0.185, blue: 0.175),
-                         Color(red: 0.065, green: 0.06, blue: 0.055)],
+    static func keycap(tint: Color?) -> some View {
+        let well = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        let cap = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let capTop = tint == nil ? Color(red: 0.95, green: 0.92, blue: 0.84)
+                                 : Color(red: 1.00, green: 0.80, blue: 0.50)
+        let capBot = tint == nil ? Color(red: 0.72, green: 0.68, blue: 0.58)
+                                 : Color(red: 0.86, green: 0.50, blue: 0.22)
+        return ZStack {
+            // The recessed well the cap sits in.
+            well.fill(LinearGradient(
+                colors: [Color(red: 0.02, green: 0.02, blue: 0.02),
+                         Color(red: 0.10, green: 0.095, blue: 0.09)],
                 startPoint: .top, endPoint: .bottom))
-            // Ember smoulder from the base for a lit key (BOOST).
-            .overlay(
-                shape.fill(RadialGradient(
-                    colors: [(glow ?? .clear).opacity(glow == nil ? 0 : 0.30), .clear],
-                    center: .init(x: 0.5, y: 1.0), startRadius: 2, endRadius: 46))
-            )
-            // Chamfer: bright top-inner edge, dark bottom-inner edge.
-            .overlay(
-                shape.inset(by: 1).stroke(
-                    LinearGradient(colors: [HumanTheme.bone.opacity(0.22), .clear,
-                                            .black.opacity(0.45)],
-                                   startPoint: .top, endPoint: .bottom),
-                    lineWidth: 1.5)
-            )
-            .overlay(shape.strokeBorder(HumanTheme.bone.opacity(0.14), lineWidth: 1))
-            // Top specular.
-            .overlay(alignment: .top) {
-                Ellipse().fill(HumanTheme.bone.opacity(0.16))
-                    .frame(width: 34, height: 12).blur(radius: 6).offset(y: 6)
-            }
-            .shadow(color: .black.opacity(0.6), radius: 7, x: 0, y: 5)
-            .allowsHitTesting(false)
+                .overlay(well.strokeBorder(.black.opacity(0.7), lineWidth: 1))
+                .overlay(alignment: .bottom) {
+                    well.inset(by: 1).stroke(HumanTheme.bone.opacity(0.12), lineWidth: 1)
+                        .mask(LinearGradient(colors: [.clear, .white],
+                                             startPoint: .center, endPoint: .bottom))
+                }
+            // The domed keycap.
+            cap.fill(RadialGradient(colors: [capTop, capBot],
+                                    center: .init(x: 0.36, y: 0.30),
+                                    startRadius: 2, endRadius: 50))
+                .overlay(cap.strokeBorder(.white.opacity(0.35), lineWidth: 0.8))
+                .overlay(cap.strokeBorder(.black.opacity(0.25), lineWidth: 0.8)
+                    .mask(LinearGradient(colors: [.clear, .black],
+                                         startPoint: .center, endPoint: .bottom)))
+                .overlay(alignment: .top) {
+                    Ellipse().fill(.white.opacity(0.5))
+                        .frame(width: 36, height: 10).blur(radius: 5).offset(y: 6)
+                }
+                .padding(4)
+                .shadow(color: .black.opacity(0.55), radius: 4, x: 0, y: 3)
+        }
+        .allowsHitTesting(false)
     }
 }
 
