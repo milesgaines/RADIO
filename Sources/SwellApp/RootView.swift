@@ -38,6 +38,7 @@ private struct PlateView: View {
     @State private var showSleep = false
     @State private var showShows = false
     @State private var showMenu = false
+    @State private var showPDDesk = false
     @State private var showRing = false
     @State private var showCallIn = false
     @State private var showBroadcast = false
@@ -251,6 +252,9 @@ private struct PlateView: View {
                     onClose: { showShows = false }
                 )
             }
+            .sheet(isPresented: $showPDDesk) {
+                PDDeskSheet(stream: stream, accent: accent, onClose: { showPDDesk = false })
+            }
             .sheet(isPresented: $showMenu) {
                 BackstageSheet(
                     accent: accent,
@@ -270,6 +274,7 @@ private struct PlateView: View {
                             case .sleep: showSleep = true
                             case .host: showHostKey = true
                             case .live: showBroadcast = true
+                            case .pd: showPDDesk = true
                             }
                         }
                     },

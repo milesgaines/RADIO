@@ -8,7 +8,7 @@ import RadioKit
 /// findable path).
 struct BackstageSheet: View {
     enum Door {
-        case dial, ring, line, aircheck, read, sleep, host, live
+        case dial, ring, line, aircheck, read, sleep, host, live, pd
     }
 
     let accent: Color
@@ -48,6 +48,8 @@ struct BackstageSheet: View {
                                 name: broadcasting ? "ON AIR — CONSOLE" : "GO LIVE",
                                 blurb: "Take the air. Camera or mic — every radio flips to you.",
                                 lit: true)
+                            row(.pd, icon: "slider.horizontal.3", name: "PD DESK",
+                                blurb: "Premieres, drops, the schedule — the programmer's chair.")
                         }
                         row(.dial, icon: "dial.high.fill", name: "THE DIAL",
                             blurb: "Four stations. Swipe the room or pick one here.")
