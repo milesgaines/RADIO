@@ -53,6 +53,19 @@ CI runs two jobs on every PR: the iOS build + `RadioKitTests` on a simulator,
 and a Linux job that stands up a real Subsonic server and runs
 `tools/local-dev/verify_contract.py` against it.
 
+> **⚠️ Known operational blocker — GitHub Actions (as of 2026-08).**
+> Actions currently **cannot run** for this account: every workflow run
+> finishes in ~3–4s with `runner_id: 0`, no runner ever assigned, and the
+> logs 404 (nothing was produced because no runner started). This has held
+> across many consecutive pushes over days — it is an **account-level
+> provisioning gate** (billing/identity verification on the `milesgaines`
+> account), NOT a defect in the workflow YAML or the app code. The tell: a
+> "failure" too fast to have compiled anything. Do **not** chase it from code
+> or churn re-pushes to "fix CI" — it clears only at
+> github.com/settings/billing (or the banner on the repo's Actions page).
+> Until then, `swift test` on a Mac and the local-dev contract verifier are
+> the real verification; commit messages here record in-sim results.
+
 ## Layout
 
 | Path | Role |
@@ -106,7 +119,9 @@ presence, votes, and now-playing) feeding `LiveStreamService.applyRemoteClock`.
   the director halts, clients swap to HLS via `RadioPlayer.goLive` (HLS
   vends no tap buffers, so the plate breathes a synthetic pulse). Flip with
   `radio_set_live(station, live, title, hls_url, key)`. Broadcaster tooling
-  (mic → HLS ingest) is NOT built yet — the listener side is.
+  (mic → HLS ingest) IS built — `BroadcastService`/`BroadcastEncoder`
+  segment the mic to fMP4 HLS on-device and push to the `live-ingest` Edge
+  Function.
 - **Web player.** `web/listen.html` — supabase-js, same shared second, same
   presence rooms as the app. Supabase's shared domain force-sandboxes HTML
   (functions AND storage serve it as text/plain), so host it elsewhere
@@ -205,7 +220,8 @@ These are product/legal constraints, not preferences. Each is covered by a test
 ## Testing
 
 - `XCTest`, all against `RadioKit`. No network, no real keychain, no
-  simulator UI tests. Run with `swift test` (66 tests as of this merge).
+  simulator UI tests. Run with `swift test` (81 tests as of the 2026-07
+  spatial/resonance merge).
 - HTTP is stubbed with `StubURLProtocol` (in `SupabaseRadioTests.swift`) plumbed
   through an ephemeral `URLSession`; set `StubURLProtocol.handler` per test and
   clear it in `tearDown`.
@@ -230,7 +246,8 @@ checks, not for app login. For the full app loop run real Navidrome locally.
 ## Git workflow
 
 Default branch is `main`; work on a feature branch and push with
-`git push -u origin <branch>`. CI must be green before merge. Don't open a PR
-unless asked.
+`git push -u origin <branch>`. CI must be green before merge (but see the
+Actions blocker above — while it holds, `swift test` on a Mac is the gate).
+Don't open a PR unless asked.
 
 [XcodeGen]: https://github.com/yonaskolb/XcodeGen
